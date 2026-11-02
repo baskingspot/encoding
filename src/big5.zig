@@ -39,6 +39,31 @@ inline fn lookup(lead: u8, trail: u8) ?Pair {
     }
 }
 
+/// Writes `cp`, an index code point, at `dst[o..]` and returns the units
+/// written, or 0 when it does not fit. Every index code point is from
+/// U+00A7 and in the BMP or plane 2: two or three UTF-8 bytes or one
+/// UTF-16 unit, or four bytes or two units. Not an optional: LLVM merges
+/// the two paths of one through memory.
+inline fn putIndex(comptime Unit: type, dst: []Unit, o: usize, cp: u32) usize {
+    if (cp > 0xFFFF) {
+        if (dst.len - o < 4 / @sizeOf(Unit)) return 0;
+        return codec.put(Unit, dst, o, @intCast(cp));
+    }
+    if (Unit == u16) {
+        if (o == dst.len) return 0;
+        dst[o] = @intCast(cp);
+        return 1;
+    }
+    if (cp < 0x800) {
+        if (dst.len - o < 2) return 0;
+        dst[o..][0..2].* = .{ @intCast(0xC0 | cp >> 6), @intCast(0x80 | (cp & 0x3F)) };
+        return 2;
+    }
+    if (dst.len - o < 3) return 0;
+    dst[o..][0..3].* = .{ @intCast(0xE0 | cp >> 12), @intCast(0x80 | (cp >> 6 & 0x3F)), @intCast(0x80 | (cp & 0x3F)) };
+    return 3;
+}
+
 pub const Decoder = struct {
     /// The standard's Big5 leading, 0 for none.
     lead: u8 = 0,
@@ -100,9 +125,10 @@ pub const Decoder = struct {
                     // The four pointers with two code points have no index entry.
                     const cp = index.decode((@as(u32, b) - 0x81) * 157 + (t - offset));
                     if (cp != 0) {
-                        o += codec.tryPut(Unit, dst, o, @intCast(cp)) orelse
-                            return .{ .status = .output_full, .read = i, .written = o };
+                        const n = putIndex(Unit, dst, o, cp);
+                        if (n == 0) return .{ .status = .output_full, .read = i, .written = o };
                         i += 2;
+                        o += n;
                         continue;
                     }
                 }
