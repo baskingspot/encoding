@@ -1,29 +1,45 @@
-//! Decoders and encoders specialized at compile time to a set of encodings
-//! (docs/slop/comptime.md):
+//! The streaming decoder and encoder, `Decoder` and `Encoder`, and the
+//! same types over a chosen set of encodings, `DecoderFor` and
+//! `EncoderFor`: a program that knows its encodings at compile time links
+//! only their families' code and tables (docs/slop/comptime.md).
 //!
-//!     var decoder: DecoderFor(&.{.windows_1252}) = .init(.windows_1252, .{ .bom = .remove });
+//!     var decoder: Decoder = .init(.windows_1252, .{});
 //!     const r = decoder.decodeToUtf8(chunk, buffer, is_last_chunk);
+//!     // r.read bytes of chunk were read, r.written bytes of buffer written.
 //!
-//! `DecoderFor(encodings)` holds the state of only the families that decode
-//! one of `encodings` and dispatches over only those, so a program that
-//! uses it links only their code and tables: one family's decoder is a
-//! direct call with no tag, and a single-byte encoding links its own
-//! 256-byte table and no other. The streaming contract, the results, and
-//! the families are `Decoder`'s and `Encoder`'s. With every implemented
-//! encoding, these are the runtime types, which the plan is for `Decoder`
-//! and `Encoder` to become.
+//!     var latin1: DecoderFor(&.{.windows_1252}) = .init(.windows_1252, .{ .bom = .remove });
 //!
-//! An encoding outside the set panics in `init`, as an unimplemented one
-//! does in `Decoder.init`. A byte order mark with `.bom = .sniff` can switch
-//! to UTF-8, UTF-16BE, or UTF-16LE, so only a set with all three
-//! (`bom_encodings`) takes `Decoder.Options`; any other set takes
-//! `OptionsWithoutSniff`, whose `bom` has no `.sniff` and no default.
+//! A decode call reads as much of `src` as it can and stops when the input
+//! is empty, when the next character does not fit in `dst` (`output_full`:
+//! call again with the unread input and more room), or in fatal mode at an
+//! error (`malformed`). Every call writes whole characters, so each call's
+//! output is well-formed UTF-8 or UTF-16 by itself. Splitting the input
+//! anywhere gives the same output as one call. A `dst` of at least
+//! `maxUtf8Len(src.len)` (or `maxUtf16Len`) always takes the whole input,
+//! and one of four bytes (two units) always makes progress. Set `last` on
+//! the call with the end of the stream; then discard the decoder.
+//!
+//! The encoder is the standard's encoder for the encoding's output
+//! encoding: UTF-8 for replacement, UTF-16BE, and UTF-16LE. Ill-formed
+//! input reads as U+FFFD, as the standard's UTF-8 decoder reads it (one for
+//! each maximal subpart) and as an unpaired surrogate converts to a scalar
+//! value; a character that a call's input cuts off waits for the next call.
+//! In html mode a character the encoding lacks is written as a numeric
+//! character reference, `&#` and its decimal value and `;`; in fatal mode
+//! the call stops after it with `unmappable`. A call stops with
+//! `output_full` when the next character (or reference) does not fit; a
+//! `dst` of `maxLenFromUtf8(src.len)` (or `maxLenFromUtf16`) bytes always
+//! takes the whole input, and one of `codec.max_ncr_len` (10) bytes always
+//! makes progress. Set `last` on the call with the end of the stream.
+//!
+//! An encoding outside a type's set panics in `init`. A byte order mark
+//! with `.bom = .sniff` can switch to UTF-8, UTF-16BE, or UTF-16LE, so only
+//! a set with all three (`bom_encodings`) takes `Options`; any other set
+//! takes `OptionsWithoutSniff`, whose `bom` has no `.sniff` and no default.
 
 const std = @import("std");
 const codec = @import("codec.zig");
 const codecs = @import("codecs.zig");
-const RuntimeDecoder = @import("Decoder.zig");
-const RuntimeEncoder = @import("Encoder.zig");
 
 pub const Encoding = codec.Encoding;
 
@@ -35,7 +51,8 @@ pub const implemented = codecs.implemented;
 pub const bom_encodings = [_]Encoding{ .utf_8, .utf_16be, .utf_16le };
 
 /// Every implemented encoding but Chinese, Japanese, and Korean ones,
-/// whose tables are most of the package's size.
+/// whose tables are most of the package's size. For tests and the size
+/// measurements; not exported (docs/slop/comptime.md, decision 4).
 pub const no_cjk = blk: {
     const cjk: Set = .initMany(&.{ .shift_jis, .euc_jp, .iso_2022_jp, .gbk, .gb18030, .big5, .euc_kr });
     var list: []const Encoding = &.{};
@@ -45,9 +62,28 @@ pub const no_cjk = blk: {
     break :blk list[0..list.len].*;
 };
 
+/// What to do with a byte order mark at the start of the stream.
+pub const DecoderBom = enum(u2) {
+    /// The standard's "decode": a UTF-8, UTF-16BE, or UTF-16LE byte order
+    /// mark switches to its encoding, whatever the label said, and is
+    /// removed.
+    sniff,
+    /// Remove this encoding's own byte order mark, if it has one, as the
+    /// standard's "UTF-8 decode" does for UTF-8; switch to no other.
+    remove,
+    /// Decode a byte order mark like any other bytes: the standard's
+    /// "decode without BOM".
+    keep,
+};
+
+pub const DecoderOptions = struct {
+    mode: codec.DecoderMode = .replacement,
+    bom: DecoderBom = .sniff,
+};
+
 /// The options of a decoder whose set lacks one of `bom_encodings`.
 pub const OptionsWithoutSniff = struct {
-    mode: RuntimeDecoder.Mode = .replacement,
+    mode: codec.DecoderMode = .replacement,
     /// `.remove`, the standard's "UTF-8 decode" and TextDecoder's default,
     /// or `.keep`, "decode without BOM". No default, so that code moved
     /// from `Decoder`, whose default is `.sniff`, says which it means.
@@ -73,6 +109,10 @@ pub fn EncoderFor(comptime encodings: []const Encoding) type {
 }
 
 const bom_set: Set = .initMany(&bom_encodings);
+
+pub const EncoderOptions = struct {
+    mode: codec.EncoderMode = .html,
+};
 
 const encoding_count = @typeInfo(Encoding).@"enum".fields.len;
 const family_fields = @typeInfo(@TypeOf(codecs.families)).@"struct".fields;
@@ -234,8 +274,7 @@ fn Families(comptime set: Set, comptime decl: []const u8) type {
     };
 }
 
-/// A streaming decoder for the encodings in `set`, with `Decoder`'s
-/// contract (src/Decoder.zig): the same `init`, calls, and results.
+/// A streaming decoder for the encodings in `set`.
 pub fn Decoder(comptime set: Set) type {
     const F = Families(set, "Decoder");
     const can_sniff = set.supersetOf(bom_set);
@@ -245,8 +284,8 @@ pub fn Decoder(comptime set: Set) type {
         pub const Result = codec.DecodeResult;
         pub const Status = codec.DecodeStatus;
         pub const Mode = codec.DecoderMode;
-        pub const Bom = RuntimeDecoder.Bom;
-        pub const Options = if (can_sniff) RuntimeDecoder.Options else OptionsWithoutSniff;
+        pub const Bom = DecoderBom;
+        pub const Options = if (can_sniff) DecoderOptions else OptionsWithoutSniff;
         /// The encodings this type decodes.
         pub const encodings = set;
 
@@ -411,8 +450,7 @@ fn bomBytes(e: Encoding) []const u8 {
     };
 }
 
-/// A streaming encoder for the output encodings in `set`, with `Encoder`'s
-/// contract (src/Encoder.zig).
+/// A streaming encoder for the output encodings in `set`.
 pub fn Encoder(comptime set: Set) type {
     @setEvalBranchQuota(100_000);
     var it = set.iterator();
@@ -426,7 +464,7 @@ pub fn Encoder(comptime set: Set) type {
         pub const Result = codec.EncodeResult;
         pub const Status = codec.EncodeStatus;
         pub const Mode = codec.EncoderMode;
-        pub const Options = RuntimeEncoder.Options;
+        pub const Options = EncoderOptions;
         /// The output encodings this type encodes.
         pub const encodings = set;
 
@@ -536,4 +574,126 @@ pub fn Encoder(comptime set: Set) type {
             return .{ .status = .input_empty, .read = src.len, .written = o + r.written };
         }
     };
+}
+
+const testing = std.testing;
+const TestDecoder = DecoderFor(&implemented);
+const TestEncoder = EncoderFor(&implemented);
+
+test "a byte order mark overrides the label, split anywhere" {
+    const input = "\xEF\xBB\xBF\xE2\x82\xAC";
+    for (0..input.len + 1) |cut| {
+        var d: TestDecoder = .init(.windows_1252, .{});
+        var out: [16]u8 = undefined;
+        const a = d.decodeToUtf8(input[0..cut], &out, false);
+        try testing.expectEqual(cut, a.read);
+        const b = d.decodeToUtf8(input[cut..], out[a.written..], true);
+        try testing.expectEqualStrings("\u{20AC}", out[0 .. a.written + b.written]);
+        try testing.expectEqual(Encoding.utf_8, d.encoding);
+    }
+}
+
+test "no byte order mark: held bytes are decoded" {
+    var d: TestDecoder = .init(.windows_1252, .{});
+    var out: [16]u8 = undefined;
+    try testing.expectEqual(
+        TestDecoder.Result{ .status = .input_empty, .read = 2, .written = 0 },
+        d.decodeToUtf8("\xEF\xBB", &out, false),
+    );
+    const r = d.decodeToUtf8("x", &out, true);
+    try testing.expectEqualStrings("\u{EF}\u{BB}x", out[0..r.written]);
+    var e: TestDecoder = .init(.windows_1252, .{});
+    const s = e.decodeToUtf8("\xFE", &out, true);
+    try testing.expectEqualStrings("\u{FE}", out[0..s.written]);
+}
+
+test "remove strips only the encoding's own mark" {
+    var d: TestDecoder = .init(.utf_8, .{ .bom = .remove });
+    var out: [16]u16 = undefined;
+    const r = d.decodeToUtf16("\xFF\xFEa", &out, true);
+    try testing.expectEqualSlices(u16, &.{ 0xFFFD, 0xFFFD, 'a' }, out[0..r.written]);
+    var k: TestDecoder = .init(.utf_8, .{ .bom = .keep });
+    const s = k.decodeToUtf16("\xEF\xBB\xBFa", &out, true);
+    try testing.expectEqualSlices(u16, &.{ 0xFEFF, 'a' }, out[0..s.written]);
+    var l: TestDecoder = .init(.utf_16le, .{ .bom = .remove });
+    const t = l.decodeToUtf16("\xFF\xFEa\x00", &out, true);
+    try testing.expectEqualSlices(u16, &.{'a'}, out[0..t.written]);
+}
+
+test "replay that runs out of room keeps the held bytes" {
+    var d: TestDecoder = .init(.windows_1252, .{});
+    var out: [8]u8 = undefined;
+    _ = d.decodeToUtf8("\xEF\xBB", &out, false);
+    try testing.expectEqual(
+        TestDecoder.Result{ .status = .output_full, .read = 0, .written = 0 },
+        d.decodeToUtf8("x", out[0..1], true),
+    );
+    try testing.expectEqual(
+        TestDecoder.Result{ .status = .output_full, .read = 0, .written = 2 },
+        d.decodeToUtf8("x", out[0..3], true),
+    );
+    const r = d.decodeToUtf8("x", out[2..], true);
+    try testing.expectEqual(TestDecoder.Result{ .status = .input_empty, .read = 1, .written = 3 }, r);
+    try testing.expectEqualStrings("\u{EF}\u{BB}x", out[0..5]);
+}
+
+test "output encodings" {
+    const e: TestEncoder = .init(.utf_16le, .{});
+    try testing.expectEqual(Encoding.utf_8, e.encoding);
+}
+
+test "a character split across calls" {
+    var e: TestEncoder = .init(.windows_1252, .{});
+    var out: [32]u8 = undefined;
+    try testing.expectEqual(
+        TestEncoder.Result{ .status = .input_empty, .read = 2, .written = 1 },
+        e.encodeFromUtf8("a\xE2", &out, false),
+    );
+    try testing.expectEqual(
+        TestEncoder.Result{ .status = .input_empty, .read = 1, .written = 0 },
+        e.encodeFromUtf8("\x82", &out, false),
+    );
+    try testing.expectEqual(
+        TestEncoder.Result{ .status = .input_empty, .read = 2, .written = 2 },
+        e.encodeFromUtf8("\xACb", &out, true),
+    );
+    try testing.expectEqualStrings("\x80b", out[0..2]);
+    // A sequence broken by the next byte: U+FFFD, then the byte.
+    try testing.expectEqual(
+        TestEncoder.Result{ .status = .input_empty, .read = 1, .written = 0 },
+        e.encodeFromUtf8("\xE2", &out, false),
+    );
+    const r = e.encodeFromUtf8("c", &out, true);
+    try testing.expectEqualStrings("&#65533;c", out[0..r.written]);
+}
+
+test "a surrogate pair split across calls, and a lone one" {
+    var e: TestEncoder = .init(.utf_8, .{});
+    var out: [16]u8 = undefined;
+    try testing.expectEqual(
+        TestEncoder.Result{ .status = .input_empty, .read = 1, .written = 0 },
+        e.encodeFromUtf16(&.{0xD83D}, &out, false),
+    );
+    try testing.expectEqual(
+        TestEncoder.Result{ .status = .input_empty, .read = 1, .written = 4 },
+        e.encodeFromUtf16(&.{0xDE00}, &out, false),
+    );
+    try testing.expectEqualStrings("\u{1F600}", out[0..4]);
+    _ = e.encodeFromUtf16(&.{0xD83D}, &out, false);
+    const r = e.encodeFromUtf16(&.{'x'}, &out, true);
+    try testing.expectEqualStrings("\u{FFFD}x", out[0..r.written]);
+}
+
+test "fatal mode stops after the unmappable character" {
+    var e: TestEncoder = .init(.iso_8859_2, .{ .mode = .fatal });
+    var out: [16]u8 = undefined;
+    const r = e.encodeFromUtf16(&.{ 'a', 0x20AC, 'b' }, &out, true);
+    try testing.expectEqual(
+        TestEncoder.Result{ .status = .unmappable, .read = 2, .written = 1, .unmappable = 0x20AC },
+        r,
+    );
+    try testing.expectEqual(
+        TestEncoder.Result{ .status = .input_empty, .read = 1, .written = 1 },
+        e.encodeFromUtf16(&.{'b'}, out[1..], true),
+    );
 }

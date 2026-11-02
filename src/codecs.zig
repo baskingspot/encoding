@@ -1,9 +1,10 @@
 //! The registry of codec families. A family is a file that implements the
 //! standard's decoder (and, where the standard has one, encoder) for one
 //! or more encodings: utf8.zig for UTF-8, single_byte.zig for the 28
-//! single-byte encodings, and so on. `Decoder` and `Encoder` hold a
-//! family's state in a union built from this list and dispatch on it, so
-//! adding a family is one line in `families`.
+//! single-byte encodings, and so on. `Decoder` and `Encoder`
+//! (src/coder.zig) hold the state of the families their set of encodings
+//! needs, built from this list, and dispatch over them, so adding a family
+//! is one line in `families`.
 //!
 //! A family file declares:
 //!
@@ -67,100 +68,6 @@ pub const family_of: [encoding_count]?Family = blk: {
     }
     break :blk t;
 };
-
-fn FamilyDecl(comptime f: std.builtin.Type.StructField, comptime decl: []const u8) type {
-    const module = @field(families, f.name);
-    return if (@hasDecl(module, decl)) @field(module, decl) else void;
-}
-
-fn StateUnion(comptime decl: []const u8) type {
-    var names: [family_fields.len][]const u8 = undefined;
-    var types: [family_fields.len]type = undefined;
-    var attrs: [family_fields.len]std.builtin.Type.UnionField.Attributes = undefined;
-    for (family_fields, 0..) |f, i| {
-        names[i] = f.name;
-        types[i] = FamilyDecl(f, decl);
-        attrs[i] = .{};
-    }
-    return @Union(.auto, Family, &names, &types, &attrs);
-}
-
-/// A decoder's state: its family's `Decoder`.
-pub const DecoderState = StateUnion("Decoder");
-/// An encoder's state: its family's `Encoder`, `void` for a family with
-/// none.
-pub const EncoderState = StateUnion("Encoder");
-
-fn familyOf(e: Encoding) Family {
-    return family_of[@intFromEnum(e)] orelse std.debug.panic("encoding: {s} is not implemented yet", .{e.name()});
-}
-
-/// A fresh decoder for `e`. Panics if `e` is not implemented yet.
-pub fn initDecoder(e: Encoding) DecoderState {
-    switch (familyOf(e)) {
-        inline else => |tag| {
-            const T = @field(families, @tagName(tag)).Decoder;
-            return @unionInit(DecoderState, @tagName(tag), T.init(e));
-        },
-    }
-}
-
-/// A fresh encoder for `e`, an output encoding. Panics if `e` is not
-/// implemented yet.
-pub fn initEncoder(e: Encoding) EncoderState {
-    std.debug.assert(e.outputEncoding() == e);
-    switch (familyOf(e)) {
-        inline else => |tag| {
-            const T = @FieldType(EncoderState, @tagName(tag));
-            if (T == void) unreachable;
-            return @unionInit(EncoderState, @tagName(tag), T.init(e));
-        },
-    }
-}
-
-pub inline fn decode(
-    state: *DecoderState,
-    comptime Unit: type,
-    src: []const u8,
-    dst: []Unit,
-    last: bool,
-    mode: codec.DecoderMode,
-) codec.DecodeResult {
-    switch (state.*) {
-        inline else => |*s| return s.decode(Unit, src, dst, last, mode),
-    }
-}
-
-pub fn decoderMaxLen(state: *const DecoderState, comptime Unit: type, n: usize) ?usize {
-    switch (state.*) {
-        inline else => |*s| return s.maxLen(Unit, n),
-    }
-}
-
-pub inline fn encode(
-    state: *EncoderState,
-    comptime Unit: type,
-    src: []const Unit,
-    dst: []u8,
-    last: bool,
-    mode: codec.EncoderMode,
-) codec.EncodeResult {
-    switch (state.*) {
-        inline else => |*s| {
-            if (@TypeOf(s.*) == void) unreachable;
-            return s.encode(Unit, src, dst, last, mode);
-        },
-    }
-}
-
-pub fn encoderMaxLen(state: *const EncoderState, comptime Unit: type, n: usize, mode: codec.EncoderMode) ?usize {
-    switch (state.*) {
-        inline else => |*s| {
-            if (@TypeOf(s.*) == void) unreachable;
-            return s.maxLen(Unit, n, mode);
-        },
-    }
-}
 
 /// Every encoding this version implements, in `Encoding` order: what the
 /// tests, fuzzers, and harnesses iterate over.

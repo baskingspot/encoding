@@ -14,8 +14,15 @@ const std = @import("std");
 const codec = @import("codec.zig");
 
 pub const Encoding = @import("encoding.zig").Encoding;
-pub const Decoder = @import("Decoder.zig");
-pub const Encoder = @import("Encoder.zig");
+const coder = @import("coder.zig");
+pub const DecoderFor = coder.DecoderFor;
+pub const EncoderFor = coder.EncoderFor;
+pub const bom_encodings = coder.bom_encodings;
+pub const OptionsWithoutSniff = coder.OptionsWithoutSniff;
+/// A decoder for every implemented encoding, chosen at run time.
+pub const Decoder = DecoderFor(&implemented);
+/// An encoder for every implemented encoding, chosen at run time.
+pub const Encoder = EncoderFor(&implemented);
 pub const DecodeResult = codec.DecodeResult;
 pub const DecodeStatus = codec.DecodeStatus;
 pub const EncodeResult = codec.EncodeResult;
@@ -35,4 +42,6 @@ test {
     _ = codec;
     // The families' tests come in through `codecs.families`.
     _ = @import("codecs.zig");
+    _ = coder;
+    _ = @import("specialized_test.zig");
 }

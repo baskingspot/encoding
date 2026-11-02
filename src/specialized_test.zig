@@ -1,4 +1,4 @@
-//! Tests of src/specialized.zig. The specialized types share the families
+//! Tests of src/coder.zig. The specialized types share the families
 //! with `Decoder` and `Encoder` and repeat only their wrappers (byte order
 //! marks, held bytes, split characters), so each is run in lockstep with
 //! the runtime type: the same chunks and output room on both, and every
@@ -8,10 +8,10 @@
 
 const std = @import("std");
 const testing = std.testing;
-const specialized = @import("specialized.zig");
+const specialized = @import("coder.zig");
 const codecs = @import("codecs.zig");
-const Decoder = @import("Decoder.zig");
-const Encoder = @import("Encoder.zig");
+const Decoder = specialized.DecoderFor(&codecs.implemented);
+const Encoder = specialized.EncoderFor(&codecs.implemented);
 const Encoding = specialized.Encoding;
 
 const rounds = 60;
@@ -254,34 +254,4 @@ test "a fresh decoder's buffer size is known at compile time" {
     const S = specialized.DecoderFor(&(.{.windows_1252} ++ specialized.bom_encodings));
     try testing.expectEqual(48, comptime S.init(.windows_1252, .{}).maxUtf8Len(16).?);
     try testing.expectEqual(16, comptime S.init(.windows_1252, .{}).maxUtf16Len(16).?);
-}
-
-test "inline_init's Decoder, the experiment without a new type, matches Decoder" {
-    const inline_init = @import("inline_init.zig");
-    var prng: std.Random.DefaultPrng = .init(4);
-    const rng = prng.random();
-    var buf: [96]u8 = undefined;
-    inline for (codecs.implemented) |e| {
-        for ([_]Decoder.Mode{ .replacement, .fatal }) |mode| {
-            for (0..rounds) |_| {
-                const src = decoderInput(rng, &buf);
-                var a: Decoder = .init(e, .{ .mode = mode, .bom = .keep });
-                var b: inline_init.Decoder = .init(e, .{ .mode = mode, .bom = .keep });
-                var out_a: [256]u8 = undefined;
-                var out_b: [256]u8 = undefined;
-                const room = rng.intRangeAtMost(usize, 4, out_a.len);
-                try testing.expectEqual(a.maxUtf8Len(src.len), b.maxUtf8Len(src.len));
-                const ra = a.decodeToUtf8(src, out_a[0..room], true);
-                const rb = b.decodeToUtf8(src, out_b[0..room], true);
-                try testing.expectEqual(ra, rb);
-                try testing.expectEqualSlices(u8, out_a[0..ra.written], out_b[0..rb.written]);
-                var w_a: [128]u16 = undefined;
-                var w_b: [128]u16 = undefined;
-                const ua = a.decodeToUtf16(src[ra.read..], &w_a, true);
-                const ub = b.decodeToUtf16(src[rb.read..], &w_b, true);
-                try testing.expectEqual(ua, ub);
-                try testing.expectEqualSlices(u16, w_a[0..ua.written], w_b[0..ub.written]);
-            }
-        }
-    }
 }

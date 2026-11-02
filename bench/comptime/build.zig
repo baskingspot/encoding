@@ -3,7 +3,7 @@
 //!
 //!     zig build test                  src/specialized_test.zig, Debug and ReleaseSafe
 //!     zig build sizes -Doptimize=M    the link-size programs, into zig-out/bin/size-*
-//!     zig build arms                  bench-comptime, -generic, and -inline, for bench-compare
+//!     zig build arms                  bench-comptime and bench-generic, for bench-compare
 //!
 //! Run from this directory. The package comes from this checkout.
 
@@ -35,30 +35,24 @@ pub fn build(b: *std.Build) void {
             .strip = strip,
         });
         mod.addOptions("options", opts);
-        switch (v) {
-            .none => {},
-            .label, .rt_1252, .rt_label, .rt_enc_label => mod.addImport("encoding", package(b, target, optimize)),
-            .vt_1252, .vt_label => mod.addImport("encoding", prototype(b, "src/inline_init.zig", target, optimize)),
-            else => mod.addImport("encoding", prototype(b, "src/specialized.zig", target, optimize)),
-        }
+        if (v != .none) mod.addImport("encoding", package(b, target, optimize));
         const exe = b.addExecutable(.{ .name = b.fmt("size-{t}", .{v}), .root_module = mod });
         sizes.dependOn(&b.addInstallArtifact(exe, .{}).step);
     }
 
     // The bench-compare arms: bench/zig/arm.zig's protocol over the
     // prototype's types. ReleaseFast for the host, as bench-zig is.
-    const arms = b.step("arms", "Build bench-comptime, bench-generic, and bench-inline");
+    const arms = b.step("arms", "Build bench-comptime and bench-generic");
     const testingx = b.dependency("testingx", .{ .target = target }).module("testingx");
     for (std.enums.values(Kind)) |kind| {
         const opts = b.addOptions();
         opts.addOption(Kind, "kind", kind);
-        const root = if (kind == .inline_init) "src/inline_init.zig" else "src/specialized.zig";
         const mod = b.createModule(.{
             .root_source_file = b.path("arm.zig"),
             .target = target,
             .optimize = .ReleaseFast,
             .imports = &.{
-                .{ .name = "encoding", .module = prototype(b, root, target, .ReleaseFast) },
+                .{ .name = "encoding", .module = package(b, target, .ReleaseFast) },
                 .{ .name = "testingx", .module = testingx },
             },
         });
@@ -66,7 +60,6 @@ pub fn build(b: *std.Build) void {
         const name = switch (kind) {
             .comptime_set => "comptime",
             .generic => "generic",
-            .inline_init => "inline",
         };
         const exe = b.addExecutable(.{ .name = b.fmt("bench-{s}", .{name}), .root_module = mod });
         arms.dependOn(&b.addInstallArtifact(exe, .{}).step);
@@ -74,7 +67,7 @@ pub fn build(b: *std.Build) void {
 }
 
 /// What an arm times (arm.zig).
-pub const Kind = enum { comptime_set, generic, inline_init };
+pub const Kind = enum { comptime_set, generic };
 
 pub const Variant = enum {
     /// Copies stdin to stdout: the baseline.
@@ -115,11 +108,6 @@ pub const Variant = enum {
     ct_enc_1252,
     /// `EncoderFor(&.{.shift_jis})`.
     ct_enc_sjis,
-    /// src/inline_init.zig's `Decoder.init(.windows_1252, ...)`: no new
-    /// type, an inline `init` and a function pointer.
-    vt_1252,
-    /// src/inline_init.zig's `Decoder` for the label in argv[1].
-    vt_label,
 };
 
 /// The package's module, as a consumer gets it.

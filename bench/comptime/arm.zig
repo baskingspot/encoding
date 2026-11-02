@@ -10,9 +10,6 @@
 //!   at compile time calls it.
 //! - `bench-generic`: `DecoderFor(&implemented)` and `EncoderFor(&implemented)` with the encoding
 //!   at run time: the runtime types built from the generic.
-//! - `bench-inline`: src/inline_init.zig's `Decoder`, an inline `init`
-//!   with the encoding known at compile time and a function pointer for
-//!   the family; it has no encoder, so its encode rows are skipped.
 //!
 //! Same protocol, inputs, buffers, and checksums as bench/zig/arm.zig.
 
@@ -56,7 +53,7 @@ const fns: [ops.len][encoding_count]?Fn = blk: {
         const C = Calls(if (kind == .generic) .utf_8 else e);
         t[0][@intFromEnum(e)] = C.decodeUtf8;
         t[1][@intFromEnum(e)] = C.decodeUtf16;
-        if (kind == .inline_init or e.outputEncoding() != e) continue;
+        if (e.outputEncoding() != e) continue;
         t[2][@intFromEnum(e)] = C.encodeUtf8;
         t[3][@intFromEnum(e)] = C.encodeUtf16;
     }
@@ -65,18 +62,16 @@ const fns: [ops.len][encoding_count]?Fn = blk: {
 
 const encoding_count = std.enums.values(Encoding).len;
 
-/// The timed calls for `ce`: specialized to it in `bench-comptime` and
-/// `bench-inline`, on the run-time encoding in `bench-generic`.
+/// The timed calls for `ce`: specialized to it in `bench-comptime`, on
+/// the run-time encoding in `bench-generic`.
 fn Calls(comptime ce: Encoding) type {
     const D = switch (kind) {
         .comptime_set => encoding.DecoderFor(&.{ce}),
         .generic => encoding.DecoderFor(&encoding.implemented),
-        .inline_init => encoding.Decoder,
     };
     const E = switch (kind) {
         .comptime_set => encoding.EncoderFor(&.{ce}),
         .generic => encoding.EncoderFor(&encoding.implemented),
-        .inline_init => void,
     };
     return struct {
         fn which(e: Encoding) Encoding {

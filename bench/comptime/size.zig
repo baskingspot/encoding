@@ -31,12 +31,10 @@ pub fn main(init: std.process.Init) !void {
         .ct_gb18030 => run(enc.DecoderFor(&.{.gb18030}).init(.gb18030, .{ .bom = .remove }), r, w),
         .ct_euc_kr => run(enc.DecoderFor(&.{.euc_kr}).init(.euc_kr, .{ .bom = .remove }), r, w),
         .ct_utf8_1252 => run(Utf8Or1252.init(try forLabel(label), .{ .bom = .remove }), r, w),
-        .ct_nocjk_label => run(enc.DecoderFor(&enc.no_cjk).init(try forLabel(label), .{}), r, w),
+        .ct_nocjk_label => run(enc.DecoderFor(&no_cjk).init(try forLabel(label), .{}), r, w),
         .ct_all_label => run(enc.DecoderFor(&enc.implemented).init(try forLabel(label), .{}), r, w),
         .ct_enc_1252 => run(enc.EncoderFor(&.{.windows_1252}).init(.windows_1252, .{}), r, w),
         .both => both(label, r, w),
-        .vt_1252 => run(enc.Decoder.init(.windows_1252, .{ .bom = .keep }), r, w),
-        .vt_label => run(enc.Decoder.init(try forLabel(label), .{ .bom = .keep }), r, w),
         .ct_enc_sjis => run(enc.EncoderFor(&.{.shift_jis}).init(.shift_jis, .{}), r, w),
     };
     try stdout.interface.flush();
@@ -94,3 +92,14 @@ fn run(coder: anytype, r: *std.Io.Reader, w: *std.Io.Writer) !void {
         if (last) return;
     }
 }
+
+/// Every implemented encoding but the CJK ones, which the package does
+/// not export.
+const no_cjk = if (variant == .none) .{} else blk: {
+    var list: []const enc.Encoding = &.{};
+    for (enc.implemented) |e| switch (e) {
+        .shift_jis, .euc_jp, .iso_2022_jp, .gbk, .gb18030, .big5, .euc_kr => {},
+        else => list = list ++ .{e},
+    };
+    break :blk list[0..list.len].*;
+};
