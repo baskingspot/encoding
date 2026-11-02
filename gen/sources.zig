@@ -86,6 +86,13 @@ pub const multi_byte: []const MultiByte = &.{
         .layout = .japanese_paged,
         .encode = false,
     },
+    .{ .name = "gb18030", .file = "whatwg-encoding/index-gb18030.txt" },
+    .{
+        .name = "big5",
+        .file = "whatwg-encoding/index-big5.txt",
+        .exclude = &.{.{ 0, (0xA1 - 0x81) * 157 - 1 }},
+        .last = &.{ 0x2550, 0x255E, 0x2561, 0x256A, 0x5341, 0x5345 },
+    },
 };
 
 /// Every multi-byte index in the standard, for `zig build test-layouts`,

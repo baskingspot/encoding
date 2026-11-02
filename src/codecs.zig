@@ -41,6 +41,8 @@ pub const families = .{
     .japanese = @import("japanese.zig"), // ziglint-ignore: Z028
 
     // Wave 1, Chinese: GBK and gb18030, Big5.
+    .gb18030 = @import("gb18030.zig"), // ziglint-ignore: Z028
+    .big5 = @import("big5.zig"), // ziglint-ignore: Z028
 
     // Wave 1, Korean: EUC-KR.
 };

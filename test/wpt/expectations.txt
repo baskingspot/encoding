@@ -14,5 +14,4 @@ FAIL encoding/textdecoder-mistakes.any.js :: fatal stream: utf-8 -- expects a fa
 
 # Encodings this version does not implement yet. Each failure names the
 # encoding; the wave that adds one deletes its line.
-FAIL encoding/** :: /(GBK|gb18030|Big5) is not implemented yet/ -- Chinese encodings: not implemented yet
 FAIL encoding/** :: /EUC-KR is not implemented yet/ -- Korean encoding: not implemented yet
