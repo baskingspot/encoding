@@ -83,7 +83,7 @@ fn writeAstralReturn(w: *Writer, s: Shape, words: []const u8, at: []const u8) !v
     , .{ words, at, at, s.plane });
 }
 
-fn emitDecodeFlat(w: *Writer, gpa: Allocator, entries: []const index.Entry) !void {
+pub fn emitDecodeFlat(w: *Writer, gpa: Allocator, entries: []const index.Entry) !void {
     const s = try shapeOf(entries);
     const table = try byPointer(gpa, entries, s.end);
     defer gpa.free(table);

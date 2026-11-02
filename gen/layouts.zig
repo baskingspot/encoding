@@ -38,6 +38,9 @@ const impls = .{
 
     // Wave 1, Chinese: decode flat with a plane-2 bit, encode by rank.
     .chinese_rank = @import("layouts/chinese_rank.zig"), // ziglint-ignore: Z028
+
+    // Wave 2: chinese_rank with runs in the encode table.
+    .flat_runs = @import("layouts/flat_runs.zig"), // ziglint-ignore: Z028
 };
 
 pub const Layout = std.meta.FieldEnum(@TypeOf(impls));
