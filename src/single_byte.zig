@@ -92,10 +92,33 @@ pub const Decoder = struct {
                 copyAscii(Unit, dst[o..][0..ascii], src[i..][0..ascii]);
                 i += ascii;
                 o += ascii;
+                if (i == src.len) return .{ .status = .input_empty, .read = i, .written = o };
             }
             // Then a block's worth of bytes one at a time, at least up to
             // the first non-ASCII byte.
             const end = @min(src.len, i + codec.ascii_block);
+            // A byte is at most one UTF-16 unit or three UTF-8 bytes (the
+            // tables hold only BMP code points), so with room for the whole
+            // block the loop needs no room checks.
+            const per: usize = if (Unit == u16) 1 else 3;
+            if ((dst.len - o) / per >= end - i) {
+                while (i < end) : (i += 1) {
+                    const b = src[i];
+                    if (b < 0x80) {
+                        dst[o] = b;
+                        o += 1;
+                        continue;
+                    }
+                    var c = table[b - 0x80];
+                    if (c == 0) {
+                        if (mode == .fatal) return .{ .status = .malformed, .read = i + 1, .written = o };
+                        c = codec.replacement_character;
+                    }
+                    o += codec.put(Unit, dst, o, c);
+                }
+                if (i == src.len) return .{ .status = .input_empty, .read = i, .written = o };
+                continue;
+            }
             while (i < end) {
                 const b = src[i];
                 if (b < 0x80) {
