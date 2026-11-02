@@ -17,7 +17,6 @@ pub const encodings = [_]Encoding{.utf_8};
 const little = codec.native_endian == .little;
 const utf8_to_native = if (little) utf.convert.utf8ToUtf16le else utf.convert.utf8ToUtf16be;
 const native_to_utf8 = if (little) utf.convert.utf16leToUtf8 else utf.convert.utf16beToUtf8;
-const utf8_from_native = if (little) utf.length.utf8FromUtf16le else utf.length.utf8FromUtf16be;
 
 pub const Decoder = struct {
     /// The start of a character the previous call's input cut off: a
@@ -135,16 +134,11 @@ fn decodeBody(comptime Unit: type, src: []const u8, dst: []Unit, last: bool, mod
             i += good;
             o += good;
         } else {
+            // On an error utf reports where it starts and what it wrote
+            // for everything before it.
             const r = utf8_to_native(window, dst[o..]);
-            if (r.err == .none) {
-                i += window.len;
-                o += r.count;
-            } else {
-                // utf reports where the error starts; everything before
-                // it is converted.
-                o += utf.length.utf16FromUtf8(window[0..r.count]);
-                i += r.count;
-            }
+            i += if (r.err == .none) window.len else r.count;
+            o += r.written;
         }
         if (i == src.len) break;
         // An error, or a character the window or the input cuts off.
@@ -212,12 +206,11 @@ pub const Encoder = struct {
             if (n != 0) {
                 const window = src[i..][0..n];
                 const r = native_to_utf8(window, dst[o..]);
+                o += r.written;
                 if (r.err == .none) {
                     i += n;
-                    o += r.count;
                     continue;
                 }
-                o += utf8_from_native(window[0..r.count]);
                 i += r.count;
             }
             // An unpaired surrogate, a pair the window cuts, or too little

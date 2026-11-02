@@ -164,10 +164,7 @@ pub const Decoder = struct {
         const units = buf[0..n];
         @memcpy(std.mem.sliceAsBytes(units), src[0 .. 2 * n]);
         const r = if (d.big_endian) utf.convert.utf16beToUtf8(units, dst) else utf.convert.utf16leToUtf8(units, dst);
-        if (r.err == .none) return .{ .read = 2 * n, .written = r.count };
-        const before = units[0..r.count];
-        const written = if (d.big_endian) utf.length.utf8FromUtf16be(before) else utf.length.utf8FromUtf16le(before);
-        return .{ .read = 2 * r.count, .written = written };
+        return .{ .read = 2 * (if (r.err == .none) n else r.count), .written = r.written };
     }
 
     pub fn maxLen(d: *const Decoder, comptime Unit: type, n: usize) ?usize {
