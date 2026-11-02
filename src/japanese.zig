@@ -257,9 +257,25 @@ pub const Decoder = struct {
         last: bool,
         mode: codec.DecoderMode,
     ) DecodeResult {
+        return switch (d.kind) {
+            inline else => |k| d.decodeAs(Unit, @field(Encoding, @tagName(k)), src, dst, last, mode),
+        };
+    }
+
+    /// `decode` for a decoder known at compile time to be `e`'s, so that
+    /// it links only `e`'s code and tables (src/coder.zig).
+    pub inline fn decodeAs(
+        d: *Decoder,
+        comptime Unit: type,
+        comptime e: Encoding,
+        src: []const u8,
+        dst: []Unit,
+        last: bool,
+        mode: codec.DecoderMode,
+    ) DecodeResult {
         // One function each, so that each has only its own registers to
         // save: short inputs feel the prologue.
-        return switch (d.kind) {
+        return switch (comptime kindOf(e)) {
             .shift_jis => @call(.never_inline, decodeSteps, .{ d, Unit, sjisStep, sjisPair, src, dst, last, mode }),
             .euc_jp => @call(.never_inline, decodeSteps, .{ d, Unit, eucStep, eucPair, src, dst, last, mode }),
             .iso_2022_jp => @call(.never_inline, decodeIso, .{ d, Unit, src, dst, last, mode }),
@@ -542,8 +558,23 @@ pub const Encoder = struct {
         last: bool,
         mode: codec.EncoderMode,
     ) EncodeResult {
-        // One function each, as the decoders have.
         return switch (e.kind) {
+            inline else => |k| e.encodeAs(Unit, @field(Encoding, @tagName(k)), src, dst, last, mode),
+        };
+    }
+
+    /// `encode` for an encoder known at compile time to be `enc`'s.
+    pub inline fn encodeAs(
+        e: *Encoder,
+        comptime Unit: type,
+        comptime enc: Encoding,
+        src: []const Unit,
+        dst: []u8,
+        last: bool,
+        mode: codec.EncoderMode,
+    ) EncodeResult {
+        // One function each, as the decoders have.
+        return switch (comptime kindOf(enc)) {
             .shift_jis => @call(.never_inline, encodeTwoByte, .{ Unit, sjisBytes, src, dst, mode }),
             .euc_jp => @call(.never_inline, encodeTwoByte, .{ Unit, eucBytes, src, dst, mode }),
             .iso_2022_jp => @call(.never_inline, encodeIso, .{ e, Unit, src, dst, last, mode }),
