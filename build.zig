@@ -80,13 +80,13 @@ pub fn build(b: *std.Build) void {
         b.step(s[0], desc).dependOn(&run.step);
     }
 
-    // `zig build rodata -- BINARY...`: the single-byte tables' bytes in
+    // `zig build rodata -- BINARY...`: the generated tables' bytes in
     // each binary, for `just bench-rodata`.
     const rodata = b.addRunArtifact(gen);
     rodata.setCwd(b.path("."));
     rodata.addArg("rodata");
     if (b.args) |args| rodata.addArgs(args);
-    b.step("rodata", "Count the single-byte tables' bytes in each binary given after --").dependOn(&rodata.step);
+    b.step("rodata", "Count the generated tables' bytes in each binary given after --").dependOn(&rodata.step);
 
     // Every multi-byte index in every layout, generated into the cache and
     // checked against its index in full, both directions.
