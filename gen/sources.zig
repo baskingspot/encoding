@@ -43,9 +43,9 @@ pub const single_byte = [_]SingleByte{
     .{ .name = "windows_1257", .file = "whatwg-encoding/index-windows-1257.txt" },
     .{ .name = "windows_1258", .file = "whatwg-encoding/index-windows-1258.txt" },
     .{ .name = "x_mac_cyrillic", .file = "whatwg-encoding/index-x-mac-cyrillic.txt" },
-    // Outside the standard (wave 1): IBM 437 and 850 from Unicode's
-    // vendor mappings, such as
-    // .{ .name = "ibm437", .file = "unicode/CP437.TXT", .format = .unicode },
+    // Outside the standard: IBM 437 and 850 from Unicode's vendor mappings.
+    .{ .name = "ibm437", .file = "unicode/CP437.TXT", .format = .unicode },
+    .{ .name = "ibm850", .file = "unicode/CP850.TXT", .format = .unicode },
 };
 
 /// A multi-byte index, generated into src/tables/<name>.zig with a

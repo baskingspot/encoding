@@ -1,8 +1,10 @@
 //! The standard's single-byte decoder and encoder, shared by its 28
-//! single-byte encodings: bytes below 0x80 are ASCII, and each byte from
-//! 0x80 is the code point its encoding's table gives, or an error. The
-//! tables are generated (src/tables/single_byte.zig, from gen/sources.zig),
-//! 128 code points each. IBM 437 and 850 join with a table each.
+//! single-byte encodings and by IBM code pages 437 and 850, which the
+//! standard does not define: bytes below 0x80 are ASCII, and each byte
+//! from 0x80 is the code point its encoding's table gives, or an error.
+//! The tables are generated (src/tables/single_byte.zig, from
+//! gen/sources.zig), 128 code points each; the IBM ones come from
+//! Unicode's mappings of Microsoft's tables, which map every byte.
 //!
 //! Decoding copies ASCII 16 bytes at a time and looks up the rest. The
 //! encoder has no reverse table: a code point in the table's longest run
@@ -23,7 +25,7 @@ pub const encodings = [_]Encoding{
     .iso_8859_13,  .iso_8859_14,  .iso_8859_15,    .iso_8859_16,  .koi8_r,
     .koi8_u,       .macintosh,    .windows_874,    .windows_1250, .windows_1251,
     .windows_1252, .windows_1253, .windows_1254,   .windows_1255, .windows_1256,
-    .windows_1257, .windows_1258, .x_mac_cyrillic,
+    .windows_1257, .windows_1258, .x_mac_cyrillic, .ibm437,       .ibm850,
 };
 
 pub const Table = [128]u16;

@@ -1,7 +1,8 @@
-//! The single-byte encodings and x-user-defined against the standard, in
-//! full, through the public API: every byte decodes to its index code
-//! point (or is an error), and every scalar value encodes to the byte of
-//! its index pointer (or is unmappable). The indexes and the label table
+//! The single-byte encodings against the standard, IBM437 and IBM850
+//! against Unicode's mappings, and x-user-defined, in full, through the
+//! public API: every byte decodes to its index code point (or is an
+//! error), and every scalar value encodes to the byte of its index pointer
+//! (or is unmappable). The indexes and the label table
 //! are read from vendor/ at run time, so this checks the generated tables
 //! and the codecs together against the vendored files.
 
@@ -201,6 +202,44 @@ test "single-byte encodings against their indexes, both ways" {
     defer gpa.free(scalars);
     for (list) |entry| {
         setCurrent(try indexTable(entry[1]));
+        checkFull(entry[0], singleByteDecode, singleByteEncode, scalars) catch |err| {
+            std.debug.print("{s} ({s})\n", .{ entry[0].name(), entry[1] });
+            return err;
+        };
+    }
+}
+
+/// The code point of each byte from 0x80, from one of Unicode's vendor
+/// mapping files (`0x80<TAB>0x00C7<TAB>#...`), which also lists the bytes
+/// below 0x80: those must be ASCII, as the single-byte decoder has them.
+fn unicodeTable(path: []const u8) ![128]?u21 {
+    const text = try readVendor(path);
+    defer gpa.free(text);
+    var table: [256]?u21 = @splat(null);
+    var lines = std.mem.splitScalar(u8, text, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (line.len == 0 or line[0] == '#') continue;
+        var fields = std.mem.tokenizeAny(u8, line, " \t");
+        const p = fields.next().?;
+        // The files end with a DOS end-of-file byte, 0x1A, alone.
+        const c = fields.next() orelse continue;
+        if (c[0] == '#') continue;
+        table[try std.fmt.parseInt(u8, p, 0)] = try std.fmt.parseInt(u21, c, 0);
+    }
+    for (table[0..128], 0..) |cp, b| try testing.expectEqual(@as(?u21, @intCast(b)), cp);
+    return table[128..].*;
+}
+
+test "IBM437 and IBM850 against Unicode's mappings, both ways" {
+    const scalars = try allScalars();
+    defer gpa.free(scalars);
+    const pages = [_]struct { Encoding, []const u8 }{
+        .{ .ibm437, "vendor/unicode/CP437.TXT" },
+        .{ .ibm850, "vendor/unicode/CP850.TXT" },
+    };
+    for (pages) |entry| {
+        setCurrent(try unicodeTable(entry[1]));
         checkFull(entry[0], singleByteDecode, singleByteEncode, scalars) catch |err| {
             std.debug.print("{s} ({s})\n", .{ entry[0].name(), entry[1] });
             return err;
