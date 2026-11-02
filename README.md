@@ -18,7 +18,7 @@ const r = decoder.decodeToUtf8(bytes, &out, true);
 
 Nothing allocates: decoders and encoders write into buffers you own, in as many calls as the input takes, and `maxUtf8Len`, `maxUtf16Len`, `maxLenFromUtf8`, and `maxLenFromUtf16` say how big a buffer a call needs. Errors are replaced (U+FFFD when decoding, numeric character references when encoding) or, in fatal mode, reported with their position.
 
-This version implements UTF-8, UTF-16LE and BE, replacement, x-user-defined, and every single-byte encoding in the standard; the CJK encodings, IBM437, and IBM850 come next. `Encoding.isImplemented` tells which.
+This version implements every encoding in the standard, plus IBM437 and IBM850.
 
 ## Work on it
 
