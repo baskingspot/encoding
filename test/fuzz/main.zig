@@ -70,7 +70,10 @@ pub fn main(init: std.process.Init) !u8 {
             }
         } else if (std.mem.eql(u8, a, "--encoding")) {
             if (!std.mem.eql(u8, v, "all")) {
-                const e = Encoding.forLabel(v) orelse return fail();
+                // A label, or a name, for the encodings with none (IBM437).
+                const e = Encoding.forLabel(v) orelse for (std.enums.values(Encoding)) |n| {
+                    if (std.ascii.eqlIgnoreCase(n.name(), v)) break n;
+                } else return fail();
                 if (!e.isImplemented()) {
                     std.debug.print("fuzz: {s} is not implemented yet\n", .{e.name()});
                     return 2;
