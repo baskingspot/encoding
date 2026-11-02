@@ -23,3 +23,4 @@ All notable changes to encoding are recorded here. The format follows
 - GBK and gb18030 decode to UTF-8 about 15% faster.
 - Shift_JIS and EUC-JP decode about 7% faster.
 - ISO-2022-JP decodes invalid input 3 to 4 times faster.
+- The gb18030 and EUC-KR encode tables are 20.7 KB and 5.2 KB smaller in a program that encodes. GBK and gb18030 encode about 11% slower on traditional Chinese text; EUC-KR encodes as fast as before.
