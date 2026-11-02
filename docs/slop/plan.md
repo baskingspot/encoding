@@ -229,7 +229,14 @@ everything not listed.
   searches the rest. x-user-defined UTF-8 encode at 16 bytes 125.6 to 7.3
   ns; UTF-16 decode at 16 bytes 19.5 to 9.4 ns, and linear on unpaired
   surrogates. `codec.putBmp` writes a BMP code point with no optional, for
-  the CJK families. 3.49x encoding_rs over its 5,632 rows; 33 below.
+  the CJK families. 3.49x encoding_rs over its 5,632 rows; 33 below. The
+  owner decided: add the block lookup for AVX2 (`pshufb`) and NEON (`tbl`),
+  where single-byte decode is 59-74% of the AVX-512 build (wave 2b);
+  accept the NCR-heavy encode slowdowns (worst 0.52x of before, still above
+  encoding_rs) and the 16 sparse-Latin decode rows to UTF-8 at 64-256
+  bytes (0.78-1.00x encoding_rs), since a scalar path would bring back the
+  placement-sensitive loop; no reverse table for the Latin-2-type encoders,
+  which would cost up to 64 KiB each.
 - **CJK** (landed at `d361067`; cjk-fast-paths-20261102.md,
   cjk-tables-20261102.md): Big5, GBK, and gb18030 decode write without
   `tryPut`'s optional; Shift_JIS and EUC-JP copy ASCII a block at a time;
@@ -239,6 +246,21 @@ everything not listed.
   encoding_rs fell from 50 to 18. The owner kept `flat_runs` for gb18030:
   20.7 KB smaller for GBK and gb18030 encode at 0.87-0.90x, still
   13-15.7x encoding_rs.
+
+Wave 2b and wave 3, two orbs in parallel. The orchestrating thread owns
+everything not listed, including `coder.zig`, `codecs.zig`, `encoding.zig`,
+`CHANGELOG.md`, `THIRD_PARTY.md`, and this file. Each orb may append the
+lines it needs to `root.zig`, `build.zig`, `justfile`, `flake.nix`,
+`test/fuzz/main.zig`, and `.github/workflows/ci.yml`, and proposes everything else in its report.
+
+- **Portable SIMD** (running, branch `wave2b-simd-portable`):
+  `src/single_byte.zig` and `src/codec.zig`. The single-byte block lookup
+  for x86-64 without AVX-512 (SSSE3 `pshufb`, AVX2) and for aarch64 (NEON
+  `tbl`), and an aarch64 test job under qemu.
+- **Detection** (running, branch `wave3-detect`): new files only,
+  `src/detect.zig` or `src/detect/`, its tables and generator, its fuzz
+  target, and a scoring harness against chardetng and uchardet. Settles
+  decision 5.
 
 ## Decisions to measure
 
