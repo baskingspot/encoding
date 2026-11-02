@@ -16,9 +16,9 @@
 //! `codec.stage_len` bytes, which utf transcodes.
 //!
 //! The encoder has no reverse table: a code point in the table's longest
-//! run of consecutive code points is arithmetic, and any other is a vector
-//! search of the 128 entries, so each encoding costs its 256-byte table
-//! and nothing more. From UTF-16, a block's ASCII and run lanes are
+//! run of consecutive code points (in a block, also its second longest)
+//! is arithmetic, and any other is a vector search of the 128 entries, so
+//! each encoding costs its 256-byte table and nothing more. From UTF-16, a block's ASCII and runs' lanes are
 //! arithmetic on all lanes at once and the rest are searched for lane by
 //! lane; from UTF-8, utf transcodes long input to UTF-16 first.
 
@@ -53,13 +53,15 @@ pub fn tableOf(e: Encoding) *const Table {
     unreachable;
 }
 
-/// The longest run of bytes whose code points go up by one with each
-/// byte, which the encoder maps without searching.
+/// A run of bytes whose code points go up by one with each byte, which
+/// the encoder maps without searching.
 const Run = struct { cp: u16, byte: u8, len: u8 };
 
-fn longestRun(comptime table: *const Table) Run {
+/// The table's two longest runs: one script's capital and small letters
+/// are often two (x-mac-cyrillic's are).
+fn longestRuns(comptime table: *const Table) [2]Run {
     @setEvalBranchQuota(100_000);
-    var best: Run = .{ .cp = 0, .byte = 0, .len = 0 };
+    var best: [2]Run = @splat(.{ .cp = 0, .byte = 0x80, .len = 0 });
     var p: usize = 0;
     while (p < 128) {
         var n: usize = 1;
@@ -68,20 +70,28 @@ fn longestRun(comptime table: *const Table) Run {
         // tables map to themselves in a run longer than their script's
         // letters, and which text does not use.
         const c1: usize = if (table[p] >= 0x80 and table[p] < 0xA0) @min(n, 0xA0 - table[p]) else 0;
-        if (table[p] != 0 and n - c1 > best.len) best = .{ .cp = table[p] + c1, .byte = 0x80 + p + c1, .len = n - c1 };
+        const run: Run = .{ .cp = table[p] + c1, .byte = 0x80 + p + c1, .len = n - c1 };
+        if (table[p] != 0 and run.len > best[0].len) {
+            best[1] = best[0];
+            best[0] = run;
+        } else if (table[p] != 0 and run.len > best[1].len) {
+            best[1] = run;
+        }
         p += n;
     }
-    // The run gives each of its code points its first byte only if none of
+    // A run gives each of its code points its first byte only if none of
     // them appears earlier in the table.
-    for (table[0 .. best.byte - 0x80]) |c| {
-        if (c >= best.cp and c < best.cp + best.len) @compileError("single-byte run is not the first pointer");
+    for (best) |r| {
+        for (table[0 .. r.byte - 0x80]) |c| {
+            if (c >= r.cp and c < r.cp + r.len) @compileError("single-byte run is not the first pointer");
+        }
     }
     return best;
 }
 
-fn runOf(e: Encoding) Run {
+fn runsOf(e: Encoding) [2]Run {
     inline for (encodings) |t| {
-        if (e == t) return comptime longestRun(tableOf(t));
+        if (e == t) return comptime longestRuns(tableOf(t));
     }
     unreachable;
 }
@@ -237,12 +247,16 @@ inline fn lookup(table: *const Table, v: V) W {
 pub const Encoder = struct {
     table: *const Table,
     run: Run,
+    run2: Run,
 
     pub fn init(e: Encoding) Encoder {
-        return .{ .table = tableOf(e), .run = runOf(e) };
+        const runs = runsOf(e);
+        return .{ .table = tableOf(e), .run = runs[0], .run2 = runs[1] };
     }
 
-    /// The byte for `cp`, a non-ASCII scalar value, or 0 for none.
+    /// The byte for `cp`, a non-ASCII scalar value, or 0 for none. The
+    /// second run is for blocks only: tested here too, it made the speed
+    /// of the one-character loop swing with code placement.
     inline fn lookup(e: *const Encoder, cp: u32) u8 {
         const off = cp -% e.run.cp;
         if (off < e.run.len) return @intCast(e.run.byte + off);
@@ -261,8 +275,9 @@ pub const Encoder = struct {
 
     /// Encodes the block of UTF-16 at `s` into `d` and returns `block`, or
     /// the lane of the first unit the table lacks (or a surrogate), with
-    /// the lanes before it encoded. ASCII and the encoding's run are
-    /// arithmetic on every lane at once; the other lanes are searched for
+    /// the lanes before it encoded. ASCII and the encoding's runs are
+    /// arithmetic on every lane at once, the second run only when a lane
+    /// is in neither ASCII nor the first; the other lanes are searched for
     /// one by one.
     pub inline fn encodeBlock(e: *const Encoder, s: *const [block]u16, d: *[block]u8) usize {
         const u: W = s.*;
@@ -272,6 +287,13 @@ pub const Encoder = struct {
         const bytes: V = @truncate(@select(u16, ascii, u, off +% @as(W, @splat(e.run.byte))));
         d.* = bytes;
         var miss = ~(codec.highBits(ascii) | codec.highBits(in_run));
+        if (miss != 0) {
+            const off2 = u -% @as(W, @splat(e.run2.cp));
+            const in_run2 = off2 < @as(W, @splat(e.run2.len));
+            const bytes2: V = @truncate(off2 +% @as(W, @splat(e.run2.byte)));
+            d.* = @select(u8, in_run2, bytes2, bytes);
+            miss &= ~codec.highBits(in_run2);
+        }
         while (miss != 0) : (miss &= miss - 1) {
             const j = @ctz(miss);
             const b = e.search(s[j]);
