@@ -11,6 +11,3 @@ SKIP encoding/legacy-mb-japanese/iso-2022-jp/iso2022jp-encode-form-errors-statef
 
 # Tests that contradict the standard, which wins.
 FAIL encoding/textdecoder-mistakes.any.js :: fatal stream: utf-8 -- expects a fatal streaming error to drop the unread input; the standard's decode() keeps it in the I/O queue, so the next call reads 0xEF and throws
-
-# Encodings this version does not implement yet. Each failure names the
-# encoding; the wave that adds one deletes its line.
