@@ -8,11 +8,13 @@
 //!                            write the gen/sources.zig `layout_checks`
 //!                            entry NAME in LAYOUT to OUT, for
 //!                            `zig build test-layouts`
-//!     gen rodata BINARY...   how many bytes of each binary the single-byte
-//!                            tables take: each table is searched for as
-//!                            128 little-endian u16 code points, the
-//!                            layout both this package and encoding_rs
-//!                            use (`just bench-rodata`)
+//!     gen rodata BINARY...   how many bytes of each binary the generated
+//!                            tables take: each array of each table is
+//!                            searched for by its little-endian image
+//!                            (`just bench-rodata`). encoding_rs lays out
+//!                            its single-byte tables as this package does,
+//!                            so they are found in its binary too; its
+//!                            multi-byte tables are not.
 //!
 //! Run from the repository root. Output goes through `zig fmt`'s renderer,
 //! so a fresh table is byte for byte what the formatter leaves.
@@ -236,27 +238,83 @@ fn singleByteTable(gpa: std.mem.Allocator, io: Io, sb: sources.SingleByte) ![128
     return table;
 }
 
+/// One generated array as a little-endian binary holds it.
+const Image = struct { file: []const u8, name: []const u8, bytes: []const u8 };
+
+/// Arrays shorter than this match a binary by chance (the katakana table's
+/// two-byte page index matches hundreds of times), so `rodata` skips them.
+const min_image_len = 8;
+
+/// The byte image of every array literal of integers in `source`, a
+/// generated table file: `[N]u16{ ... }` and the like.
+fn arrayImages(gpa: std.mem.Allocator, file: []const u8, source: []const u8, list: *std.ArrayList(Image)) !void {
+    const tree = try std.zig.Ast.parse(gpa, try gpa.dupeZ(u8, source), .zig);
+    for (tree.rootDecls()) |decl| {
+        const var_decl = tree.fullVarDecl(decl) orelse continue;
+        const init_node = var_decl.ast.init_node.unwrap() orelse continue;
+        var buf: [2]std.zig.Ast.Node.Index = undefined;
+        const array = tree.fullArrayInit(&buf, init_node) orelse continue;
+        const array_type = tree.fullArrayType(array.ast.type_expr.unwrap() orelse continue) orelse continue;
+        const elem = tree.getNodeSource(array_type.ast.elem_type);
+        const size: usize = for ([_][]const u8{ "u8", "u16", "u32", "u64" }, [_]usize{ 1, 2, 4, 8 }) |t, n| {
+            if (std.mem.eql(u8, elem, t)) break n;
+        } else continue;
+        const bytes = try gpa.alloc(u8, size * array.ast.elements.len);
+        for (array.ast.elements, 0..) |e, i| {
+            const v = try std.fmt.parseInt(u64, tree.getNodeSource(e), 0);
+            for (0..size) |k| bytes[i * size + k] = @truncate(v >> @intCast(8 * k));
+        }
+        try list.append(gpa, .{ .file = file, .name = tree.tokenSlice(var_decl.ast.mut_token + 1), .bytes = bytes });
+    }
+}
+
+/// How many bytes of each binary the generated tables take: each array of
+/// every table `gen write` writes, single-byte and multi-byte, searched for
+/// by its byte image.
 fn rodata(gpa: std.mem.Allocator, io: Io, paths: []const []const u8) !u8 {
-    var images: [sources.single_byte.len][256]u8 = undefined;
-    for (sources.single_byte, &images) |sb, *image| {
-        const table = try singleByteTable(gpa, io, sb);
-        for (table, 0..) |cp, i| std.mem.writeInt(u16, image[2 * i ..][0..2], @intCast(cp), .little);
+    var images: std.ArrayList(Image) = .empty;
+    try arrayImages(gpa, "single_byte.zig", try singleByte(gpa, io), &images);
+    try arrayImages(gpa, "gb18030_ranges.zig", try gb18030Ranges(gpa, io), &images);
+    for (sources.multi_byte) |src| {
+        // ziglint-ignore: Z011 -- 0.16 has no Allocator.print
+        const file = try std.fmt.allocPrint(gpa, "{s}.zig", .{src.name});
+        try arrayImages(gpa, file, try multiByte(gpa, io, src, src.layout), &images);
     }
     for (paths) |path| {
         const bin = try Io.Dir.cwd().readFileAlloc(io, path, gpa, .unlimited);
-        var found: usize = 0;
-        var copies: usize = 0;
-        for (sources.single_byte, &images) |sb, *image| {
-            var n: usize = 0;
-            var at: usize = 0;
-            while (std.mem.findPos(u8, bin, at, image)) |i| : (at = i + 1) n += 1;
-            if (n == 0) std.debug.print("gen: {s}: no {s} table\n", .{ path, sb.name });
-            if (n > 0) found += 1;
-            copies += n;
+        std.debug.print("{s}:\n", .{path});
+        var total: usize = 0;
+        var i: usize = 0;
+        while (i < images.items.len) {
+            // One line per table file.
+            const file = images.items[i].file;
+            var found: usize = 0;
+            var arrays: usize = 0;
+            var copies: usize = 0;
+            var bytes: usize = 0;
+            while (i < images.items.len and std.mem.eql(u8, images.items[i].file, file)) : (i += 1) {
+                const image = images.items[i];
+                if (image.bytes.len < min_image_len) {
+                    std.debug.print("  {s} {s}: {d} bytes, too short to find, not counted\n", .{
+                        file, image.name, image.bytes.len,
+                    });
+                    continue;
+                }
+                arrays += 1;
+                var n: usize = 0;
+                var at: usize = 0;
+                while (std.mem.findPos(u8, bin, at, image.bytes)) |k| : (at = k + 1) n += 1;
+                if (n > 0) found += 1;
+                copies += n;
+                bytes += n * image.bytes.len;
+            }
+            if (found == 0) continue;
+            std.debug.print("  {s:<26} {d:>3} of {d:>3} arrays, {d:>3} copies, {d:>7} bytes\n", .{
+                file, found, arrays, copies, bytes,
+            });
+            total += bytes;
         }
-        std.debug.print("{s}: {d} of {d} single-byte tables, {d} copies, {d} bytes\n", .{
-            path, found, images.len, copies, copies * 256,
-        });
+        std.debug.print("  {s:<26} {d:>7} bytes\n", .{ "total", total });
     }
     return 0;
 }

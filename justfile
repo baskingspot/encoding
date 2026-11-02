@@ -284,10 +284,11 @@ bench-summary DIR="zig-out/bench-compare":
     echo
     awk -f bench/short.awk "${raws[@]}"
 
-[doc("The bytes the single-byte tables take in this package's and encoding_rs's arm binaries, and each binary's .rodata")]
+[doc("The bytes this package's generated tables take in its arm binary and in encoding_rs's (which shares only the single-byte layout), encoding_rs's own data tables by symbol, and each binary's .rodata")]
 [group("bench")]
 bench-rodata: bench-build
     zig build rodata -- zig-out/bin/bench-zig zig-out/bin/bench-rust
+    nm -S -C zig-out/bin/bench-rust | awk '$3 == "r" && $4 ~ /^encoding_rs::data::/ { n += strtonum("0x" $2) } END { print "zig-out/bin/bench-rust: encoding_rs::data, " n " bytes" }'
     size -A zig-out/bin/bench-zig zig-out/bin/bench-rust | grep -E '^(zig-out|\.rodata|\.text) '
 
 [doc("Everything CI runs")]
