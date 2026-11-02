@@ -111,6 +111,20 @@ the owner of each file while a wave runs.
 3. **Detection.**
 4. **Stream adapters** and the conveniences, and a README with numbers.
 
+Merge rule: every file has one owner while a wave runs. An orb that needs a
+change in a file it does not own asks for it in its report; a private helper
+in its own files is fine until the merge. Orbs push signed branches rebased on
+`origin/main` and report to the orchestrating thread, which reruns the gates,
+brings the branch onto main without merge commits, pushes, and deletes the
+branch.
+
+### Owners
+
+Wave 0, running as one orb (branch `wave0-foundations`): every file in the
+repository except this Owners section, which the orchestrating thread keeps.
+Wave 0 also proposes the wave 1 split, so that adding an encoding touches its
+own files plus at most one line in each shared registry.
+
 ## Decisions to measure
 
 1. **Table layout.** encoding_rs compresses its CJK tables (ranges and
