@@ -21,3 +21,4 @@ All notable changes to encoding are recorded here. The format follows
 
 - Big5 decodes about 10% faster.
 - GBK and gb18030 decode to UTF-8 about 15% faster.
+- Shift_JIS and EUC-JP decode about 7% faster.
