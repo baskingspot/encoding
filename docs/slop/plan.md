@@ -226,12 +226,13 @@ everything not listed.
   Loops whose speed does not depend on where the linker places them, the
   single-byte UTF-16 non-ASCII encode path, x-user-defined's per-call cost,
   and UTF-16LE's 16-byte decode.
-- **CJK** (branch `wave2-cjk`): `src/japanese.zig`, `src/gb18030.zig`,
-  `src/big5.zig`, `src/euc_kr.zig`, `gen/layouts.zig`, `gen/layouts/`,
-  `gen/main.zig`, `gen/sources.zig`, the multi-byte `src/tables/`,
-  `test/layout_check.zig`, `test/tables.zig`, and its results files. ASCII
-  and two-byte fast paths, and a table diet measured both ways (tables are
-  2.68x encoding_rs's bytes, euc_kr 4.09x).
+- **CJK** (landed at `d361067`; cjk-fast-paths-20261102.md,
+  cjk-tables-20261102.md): Big5, GBK, and gb18030 decode write without
+  `tryPut`'s optional; Shift_JIS and EUC-JP copy ASCII a block at a time;
+  ISO-2022-JP replaces errors in its ASCII loop; `japanese.zig` has
+  `decodeAs` and `encodeAs`. gb18030 and euc_kr generate in `flat_runs`:
+  tables 333,073 to 307,099 bytes (2.47x encoding_rs). CJK rows below
+  encoding_rs fell from 50 to 18.
 
 ## Decisions to measure
 
@@ -253,7 +254,10 @@ everything not listed.
    (korean-20261102.md): on euc_kr pages save 6,334 bytes (41,166 against
    47,500) but decode 5% slower geomean and 7-11% slower on Korean text, so
    euc_kr takes flat decode. **Verdict amended:** paged for jis0208 and
-   jis0212; flat for gb18030, Big5, and euc_kr. Whatever the layout, never merge
+   jis0212; flat for gb18030, Big5, and euc_kr. Wave 2 measured rows (each row cut
+   to the columns that hold code points): 11,016 bytes off euc_kr, but
+   decode 4-9% slower; not taken. Narrow u8 pages are counted (-10.7 KB
+   gb18030, -17.3 KB euc_kr) but not built. Whatever the layout, never merge
    two branches into an optional or a struct holding a `u21`: LLVM routes
    it through memory, a store-forwarding stall per character. Return early,
    or use `u32`. The same holds for any optional in a hot loop:
@@ -271,7 +275,17 @@ everything not listed.
    Chinese measured the same table, byte for byte: 12-19x encoding_rs,
    against 7-9x for a perfect hash, 4-5x for bisection, and 1-2x for a
    vector scan of the decode table, which would save 95,808 bytes.
-   **Verdict:** rank, everywhere.
+   **Verdict:** rank, everywhere. Amended in wave 2: rank with runs where
+   they pay. `flat_runs` keeps the first pointer of a block's run of
+   consecutive pointers and ranks the rest, reading the run word only for
+   code points outside it, where the run is at least half its block but not
+   all of it: gb18030 encode 54,316 to 33,590 bytes at 0.87-0.90x, euc_kr
+   41,594 to 36,346 at 0.99x. A run word read on every lookup cost 12-15%;
+   a u8 per 64 code points under a u16 per 4096 saved 5.9 KB for 5%.
+   Neither is in. CJK loops are bound by instructions (about six cycles a
+   character), so a layout that adds two instructions to every lookup
+   costs 5-10% whatever it saves in loads: put a layout's extra work on the
+   path of the characters that need it.
 3. **Sharing with utf.** Settled in wave 0: depend on utf's module, now
    pinned to its v0.1.0 release. Its public `validate`, `convert`, and
    `length` cover the UTF-8 and UTF-16 codecs, and its runtime x86-64
