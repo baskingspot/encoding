@@ -75,7 +75,24 @@ pub fn init(encoding: Encoding, options: Options) Decoder {
         },
         .keep => .decoding,
     };
-    return .{ .encoding = encoding, .mode = options.mode, .phase = phase, .state = codecs.initDecoder(encoding) };
+    return .{ .encoding = encoding, .mode = options.mode, .phase = phase, .state = freshState(encoding) };
+}
+
+/// Every implemented encoding's fresh state, built at compile time.
+/// Copying an entry is one load from read-only data. Building the state
+/// with `codecs.initDecoder` at run time writes the union in one branch per
+/// family, field by field, and the copy into the decoder then reads it
+/// back with one wider load: a store-forwarding stall on every `init`,
+/// which cost 6 to 8 ns a call (docs/slop/results/core-20261102.md).
+const fresh_states = blk: {
+    var t: [std.enums.values(Encoding).len]codecs.DecoderState = undefined;
+    for (codecs.implemented) |e| t[@intFromEnum(e)] = codecs.initDecoder(e);
+    break :blk t;
+};
+
+fn freshState(e: Encoding) codecs.DecoderState {
+    if (!e.isImplemented()) std.debug.panic("encoding: {s} is not implemented yet", .{e.name()});
+    return fresh_states[@intFromEnum(e)];
 }
 
 /// Decodes `src` to UTF-8 into `dst`.
@@ -108,7 +125,7 @@ fn maxLen(d: *const Decoder, comptime Unit: type, n: usize) ?usize {
     if (d.phase == .sniff) {
         // A byte order mark may yet switch to UTF-8 or UTF-16.
         for ([_]Encoding{ .utf_8, .utf_16le }) |e| {
-            const fresh = codecs.initDecoder(e);
+            const fresh = freshState(e);
             max = @max(max, codecs.decoderMaxLen(&fresh, Unit, total) orelse return null);
         }
     }
@@ -166,7 +183,7 @@ fn decodeSlow(d: *Decoder, comptime Unit: type, src: []const u8, dst: []Unit, la
                 .bom => |m| {
                     if (m.encoding != d.encoding) {
                         d.encoding = m.encoding;
-                        d.state = codecs.initDecoder(m.encoding);
+                        d.state = freshState(m.encoding);
                     }
                     d.pending_len = 0;
                     d.phase = .decoding;

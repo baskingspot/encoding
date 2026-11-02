@@ -45,8 +45,21 @@ state: codecs.EncoderState,
 /// `encoding.isImplemented()` is false.
 pub fn init(encoding: Encoding, options: Options) Encoder {
     const out = encoding.outputEncoding();
-    return .{ .encoding = out, .mode = options.mode, .state = codecs.initEncoder(out) };
+    if (!out.isImplemented()) std.debug.panic("encoding: {s} is not implemented yet", .{out.name()});
+    return .{ .encoding = out, .mode = options.mode, .state = fresh_states[@intFromEnum(out)] };
 }
+
+/// Every implemented output encoding's fresh state, built at compile time,
+/// for the reason `Decoder`'s are: copied from read-only data, the state
+/// costs one load, where building it at run time stalls on store
+/// forwarding.
+const fresh_states = blk: {
+    var t: [std.enums.values(Encoding).len]codecs.EncoderState = undefined;
+    for (codecs.implemented) |e| {
+        if (e.outputEncoding() == e) t[@intFromEnum(e)] = codecs.initEncoder(e);
+    }
+    break :blk t;
+};
 
 /// Encodes `src`, UTF-8, into `dst`.
 pub fn encodeFromUtf8(e: *Encoder, src: []const u8, dst: []u8, last: bool) Result {
