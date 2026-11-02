@@ -112,9 +112,95 @@ pub const Decoder = struct {
         last: bool,
         mode: codec.DecoderMode,
     ) DecodeResult {
+        var at: Pos = .{ .i = 0, .o = 0 };
+        if (d.held_len != 0) {
+            if (d.finishHeld(Unit, src, dst, last, mode, &at)) |r| return r;
+        }
+        var i = at.i;
+        var o = at.o;
+        while (i < src.len) {
+            const b = src[i];
+            if (b < 0x80) {
+                if (src.len - i >= codec.ascii_block and dst.len - o >= codec.ascii_block) {
+                    const n = asciiRun(Unit, src[i..], dst[o..]);
+                    i += n;
+                    o += n;
+                    continue;
+                }
+                if (o == dst.len) return .{ .status = .output_full, .read = i, .written = o };
+                dst[o] = b;
+                i += 1;
+                o += 1;
+                continue;
+            }
+            // A two-byte sequence, the common case.
+            if (src.len - i >= 2) {
+                const b2 = src[i + 1];
+                if (b != 0x80 and b != 0xFF and b2 >= 0x40 and b2 != 0x7F and b2 != 0xFF) {
+                    const offset: u32 = if (b2 < 0x7F) 0x40 else 0x41;
+                    if (index.decode((@as(u32, b) - 0x81) * 190 + (b2 - offset))) |cp| {
+                        o += codec.tryPut(Unit, dst, o, cp) orelse
+                            return .{ .status = .output_full, .read = i, .written = o };
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            at = .{ .i = i, .o = o };
+            if (d.slowStep(Unit, src, dst, last, mode, &at)) |r| return r;
+            i = at.i;
+            o = at.o;
+        }
+        return .{ .status = .input_empty, .read = src.len, .written = o };
+    }
+
+    const Pos = struct { i: usize, o: usize };
+
+    /// The standard's steps on the sequence at `src[at.i]`, everything the
+    /// two-byte path does not take, out of line. Moves `at` past it, or
+    /// returns the call's result.
+    noinline fn slowStep(
+        d: *Decoder,
+        comptime Unit: type,
+        src: []const u8,
+        dst: []Unit,
+        last: bool,
+        mode: codec.DecoderMode,
+        at: *Pos,
+    ) ?DecodeResult {
+        const i = at.i;
+        const o = at.o;
+        const n: u8, const cp: u21 = switch (step(src[i..], last)) {
+            .more => {
+                const rest = src[i..];
+                @memcpy(d.held[0..rest.len], rest);
+                d.held_len = @intCast(rest.len);
+                return .{ .status = .input_empty, .read = src.len, .written = o };
+            },
+            .cp => |c| .{ c.len, c.cp },
+            .err => |n| blk: {
+                if (mode == .fatal) return .{ .status = .malformed, .read = i + n, .written = o };
+                break :blk .{ n, codec.replacement_character };
+            },
+        };
+        at.o += codec.tryPut(Unit, dst, o, cp) orelse return .{ .status = .output_full, .read = i, .written = o };
+        at.i += n;
+        return null;
+    }
+
+    /// The held bytes, with as much of `src` as finishes them. Moves `at`
+    /// past what it reads and writes, or returns the call's result.
+    noinline fn finishHeld(
+        d: *Decoder,
+        comptime Unit: type,
+        src: []const u8,
+        dst: []Unit,
+        last: bool,
+        mode: codec.DecoderMode,
+        at: *Pos,
+    ) ?DecodeResult {
         var i: usize = 0;
         var o: usize = 0;
-        // The held bytes first, with as much of `src` as finishes them.
         while (d.held_len != 0) {
             const h = d.held_len;
             var buf: [4]u8 = undefined;
@@ -140,46 +226,8 @@ pub const Decoder = struct {
                 return .{ .status = .output_full, .read = i, .written = o };
             d.take(&i, n);
         }
-        while (true) {
-            // ASCII a block at a time while there is room for it.
-            const room = @min(src.len - i, dst.len - o);
-            const ascii = codec.asciiPrefixBlocks(src[i..][0..room]);
-            if (ascii != 0) {
-                copyAscii(Unit, dst[o..][0..ascii], src[i..][0..ascii]);
-                i += ascii;
-                o += ascii;
-            }
-            // Then a block's worth of characters, at least up to the first
-            // non-ASCII byte.
-            const end = @min(src.len, i + codec.ascii_block);
-            while (i < end) {
-                const b = src[i];
-                if (b < 0x80) {
-                    if (o == dst.len) return .{ .status = .output_full, .read = i, .written = o };
-                    dst[o] = b;
-                    i += 1;
-                    o += 1;
-                    continue;
-                }
-                const s = step(src[i..], last);
-                const n: u8, const cp: u21 = switch (s) {
-                    .more => {
-                        const rest = src[i..];
-                        @memcpy(d.held[0..rest.len], rest);
-                        d.held_len = @intCast(rest.len);
-                        return .{ .status = .input_empty, .read = src.len, .written = o };
-                    },
-                    .cp => |c| .{ c.len, c.cp },
-                    .err => |n| blk: {
-                        if (mode == .fatal) return .{ .status = .malformed, .read = i + n, .written = o };
-                        break :blk .{ n, codec.replacement_character };
-                    },
-                };
-                o += codec.tryPut(Unit, dst, o, cp) orelse return .{ .status = .output_full, .read = i, .written = o };
-                i += n;
-            }
-            if (i >= src.len) return .{ .status = .input_empty, .read = src.len, .written = o };
-        }
+        at.* = .{ .i = i, .o = o };
+        return null;
     }
 
     /// Takes the first `n` bytes of the held bytes and then of
@@ -204,45 +252,72 @@ pub const Decoder = struct {
     }
 };
 
-/// Copies ASCII bytes to UTF-8 or widens them to UTF-16.
-pub inline fn copyAscii(comptime Unit: type, dst: []Unit, src: []const u8) void {
-    if (Unit == u8) {
-        @memcpy(dst, src);
-        return;
-    }
-    const block = codec.ascii_block;
-    var k: usize = 0;
-    while (k < src.len) : (k += block) {
-        const v: @Vector(block, u8) = src[k..][0..block].*;
-        dst[k..][0..block].* = @as(@Vector(block, u16), v);
-    }
+/// A bit for each lane of `mask`, lane 0 in the lowest bit. A bool vector
+/// bitcasts lane 0 to the highest bit on big-endian targets.
+inline fn highBits(mask: @Vector(codec.ascii_block, bool)) u16 {
+    const bits: u16 = @bitCast(mask);
+    return if (codec.native_endian == .little) bits else @bitReverse(bits);
 }
 
-/// The units at the start of `src` in whole ASCII blocks.
-pub inline fn asciiUnits(comptime Unit: type, src: []const Unit) usize {
-    if (Unit == u8) return codec.asciiPrefixBlocks(src);
+/// Copies the ASCII bytes at the start of `src`, which starts with one,
+/// to `dst`, widened for UTF-16, a block at a time while both have a block
+/// left, and returns how many it copied. `dst` may hold more after them,
+/// which the caller overwrites.
+pub inline fn asciiRun(comptime Unit: type, src: []const u8, dst: []Unit) usize {
     const block = codec.ascii_block;
-    const V = @Vector(block, u16);
+    const V = @Vector(block, u8);
     var k: usize = 0;
-    while (src.len - k >= block) : (k += block) {
+    while (src.len - k >= block and dst.len - k >= block) {
         const v: V = src[k..][0..block].*;
-        if (@reduce(.Or, v >= @as(V, @splat(0x80)))) break;
+        dst[k..][0..block].* = if (Unit == u8) v else @as(@Vector(block, u16), v);
+        const high = highBits(v >= @as(V, @splat(0x80)));
+        if (high != 0) return k + @ctz(high);
+        k += block;
     }
     return k;
 }
 
-/// Copies ASCII units to bytes.
-pub inline fn narrowAscii(comptime Unit: type, dst: []u8, src: []const Unit) void {
-    if (Unit == u8) {
-        @memcpy(dst, src);
-        return;
-    }
+/// Copies the ASCII units at the start of `src`, UTF-8 or UTF-16 that
+/// starts with one, to `dst`, narrowed, a block at a time while both have
+/// a block left, and returns how many it copied.
+pub inline fn asciiRunOut(comptime Unit: type, src: []const Unit, dst: []u8) usize {
     const block = codec.ascii_block;
+    const V = @Vector(block, Unit);
     var k: usize = 0;
-    while (k < src.len) : (k += block) {
-        const v: @Vector(block, u16) = src[k..][0..block].*;
-        dst[k..][0..block].* = @as(@Vector(block, u8), @truncate(v));
+    while (src.len - k >= block and dst.len - k >= block) {
+        const v: V = src[k..][0..block].*;
+        dst[k..][0..block].* = if (Unit == u8) v else @as(@Vector(block, u8), @truncate(v));
+        const high = highBits(v >= @as(V, @splat(0x80)));
+        if (high != 0) return k + @ctz(high);
+        k += block;
     }
+    return k;
+}
+
+/// A scalar value an encoder read and the units it took. The code point is
+/// a u32, not a u21: LLVM merges a u21 from two paths through a three-byte
+/// store and a four-byte load, a store-forwarding stall on every character.
+pub const Read = struct { cp: u32, len: u32 };
+
+/// The scalar value at `src[i]`, `src[i] >= 0x80`, as `codec.readScalar`
+/// reads it, with the three-byte UTF-8 sequences of CJK text inline.
+pub inline fn readScalar(comptime Unit: type, src: []const Unit, i: usize) Read {
+    if (Unit == u8) {
+        const c = src[i];
+        // E0 and ED need narrower second bytes; the others take any.
+        if (c >= 0xE1 and c <= 0xEF and c != 0xED and src.len - i >= 3) {
+            const c1 = src[i + 1];
+            const c2 = src[i + 2];
+            if (c1 & 0xC0 == 0x80 and c2 & 0xC0 == 0x80) {
+                return .{ .cp = @as(u32, c & 0xF) << 12 | @as(u32, c1 & 0x3F) << 6 | (c2 & 0x3F), .len = 3 };
+            }
+        }
+    } else {
+        const u = src[i];
+        if (u < 0xD800 or u > 0xDFFF) return .{ .cp = u, .len = 1 };
+    }
+    const s = codec.readScalar(Unit, src, i);
+    return .{ .cp = s.cp, .len = @intCast(s.len) };
 }
 
 /// Up to four bytes of output, for an encoder's character.
@@ -275,6 +350,13 @@ fn privateUse(cp: u21) ?u16 {
     };
 }
 
+/// The two bytes of index gb18030 pointer `pointer`.
+inline fn twoBytes(pointer: u16) [2]u8 {
+    const trail: u8 = @intCast(pointer % 190);
+    const offset: u8 = if (trail < 0x3F) 0x40 else 0x41;
+    return .{ @intCast(pointer / 190 + 0x81), trail + offset };
+}
+
 pub const Encoder = struct {
     /// The standard's "is GBK".
     gbk: bool,
@@ -292,9 +374,8 @@ pub const Encoder = struct {
             if (privateUse(cp)) |v| return .{ .b = .{ @intCast(v >> 8), @truncate(v), 0, 0 }, .len = 2 };
         }
         if (index.encode(cp)) |pointer| {
-            const trail: u8 = @intCast(pointer % 190);
-            const offset: u8 = if (trail < 0x3F) 0x40 else 0x41;
-            return .{ .b = .{ @intCast(pointer / 190 + 0x81), trail + offset, 0, 0 }, .len = 2 };
+            const b = twoBytes(pointer);
+            return .{ .b = .{ b[0], b[1], 0, 0 }, .len = 2 };
         }
         if (e.gbk) return null;
         var p = rangesPointer(cp);
@@ -318,42 +399,73 @@ pub const Encoder = struct {
         _ = last;
         var i: usize = 0;
         var o: usize = 0;
-        while (true) {
-            const room = @min(src.len - i, dst.len - o);
-            const ascii = asciiUnits(Unit, src[i..][0..room]);
-            if (ascii != 0) {
-                narrowAscii(Unit, dst[o..][0..ascii], src[i..][0..ascii]);
-                i += ascii;
-                o += ascii;
-            }
-            const end = @min(src.len, i + codec.ascii_block);
-            while (i < end) {
-                const c = src[i];
-                if (c < 0x80) {
-                    if (o == dst.len) return .{ .status = .output_full, .read = i, .written = o };
-                    dst[o] = @intCast(c);
-                    i += 1;
-                    o += 1;
+        while (i < src.len) {
+            const c = src[i];
+            if (c < 0x80) {
+                if (src.len - i >= codec.ascii_block and dst.len - o >= codec.ascii_block) {
+                    const n = asciiRunOut(Unit, src[i..], dst[o..]);
+                    i += n;
+                    o += n;
                     continue;
                 }
-                const s = codec.readScalar(Unit, src, i);
-                if (e.lookup(s.cp)) |out| {
-                    if (dst.len - o < out.len) return .{ .status = .output_full, .read = i, .written = o };
-                    @memcpy(dst[o..][0..out.len], out.b[0..out.len]);
-                    o += out.len;
-                } else {
-                    if (mode == .fatal) return .{
-                        .status = .unmappable,
-                        .read = i + s.len,
-                        .written = o,
-                        .unmappable = s.cp,
-                    };
-                    o += codec.putNcr(dst, o, s.cp) orelse return .{ .status = .output_full, .read = i, .written = o };
-                }
-                i += s.len;
+                if (o == dst.len) return .{ .status = .output_full, .read = i, .written = o };
+                dst[o] = @intCast(c);
+                i += 1;
+                o += 1;
+                continue;
             }
-            if (i == src.len) return .{ .status = .input_empty, .read = i, .written = o };
+            const s = readScalar(Unit, src, i);
+            // A code point in index gb18030, the common case: none of the
+            // standard's earlier steps applies to one, except GBK's U+20AC.
+            if (!(e.gbk and s.cp == 0x20AC)) {
+                if (index.encode(@intCast(s.cp))) |pointer| {
+                    if (dst.len - o < 2) return .{ .status = .output_full, .read = i, .written = o };
+                    dst[o..][0..2].* = twoBytes(pointer);
+                    i += s.len;
+                    o += 2;
+                    continue;
+                }
+            }
+            var at: Pos = .{ .i = i, .o = o };
+            if (e.slowStep(Unit, src, dst, mode, s, &at)) |r| return r;
+            i = at.i;
+            o = at.o;
         }
+        return .{ .status = .input_empty, .read = i, .written = o };
+    }
+
+    const Pos = struct { i: usize, o: usize };
+
+    /// The standard's encoder on `s`, read at `src[at.i]`, out of line.
+    /// Moves `at` past it, or returns the call's result.
+    noinline fn slowStep(
+        e: *const Encoder,
+        comptime Unit: type,
+        src: []const Unit,
+        dst: []u8,
+        mode: codec.EncoderMode,
+        s: Read,
+        at: *Pos,
+    ) ?EncodeResult {
+        _ = src;
+        const i = at.i;
+        const o = at.o;
+        const cp: u21 = @intCast(s.cp);
+        if (e.lookup(cp)) |out| {
+            if (dst.len - o < out.len) return .{ .status = .output_full, .read = i, .written = o };
+            @memcpy(dst[o..][0..out.len], out.b[0..out.len]);
+            at.o += out.len;
+        } else {
+            if (mode == .fatal) return .{
+                .status = .unmappable,
+                .read = i + s.len,
+                .written = o,
+                .unmappable = cp,
+            };
+            at.o += codec.putNcr(dst, o, cp) orelse return .{ .status = .output_full, .read = i, .written = o };
+        }
+        at.i += s.len;
+        return null;
     }
 
     pub fn maxLen(e: *const Encoder, comptime Unit: type, n: usize, mode: codec.EncoderMode) ?usize {
@@ -483,6 +595,14 @@ test "encoder: gb18030 and GBK" {
         EncodeResult{ .status = .unmappable, .read = 4, .written = 1, .unmappable = 0xE5E5 },
         encodeAll(.gb18030, "a\u{E5E5}b", .fatal, &out),
     );
+}
+
+test "the encoder's Private Use table and U+E5E5 are outside index gb18030, which its two-byte path relies on" {
+    var cp: u21 = 0xE78D;
+    while (cp <= 0xE864) : (cp += 1) {
+        if (privateUse(cp) != null) try testing.expectEqual(@as(?u16, null), index.encode(cp));
+    }
+    try testing.expectEqual(@as(?u16, null), index.encode(0xE5E5));
 }
 
 test "every two-byte sequence decodes, and encodes back unless another has its code point first" {

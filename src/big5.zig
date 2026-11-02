@@ -74,49 +74,83 @@ pub const Decoder = struct {
             o = r.written;
             if (r.err and mode == .fatal) return .{ .status = .malformed, .read = i, .written = o };
         }
-        while (true) {
-            const room = @min(src.len - i, dst.len - o);
-            const ascii = codec.asciiPrefixBlocks(src[i..][0..room]);
-            if (ascii != 0) {
-                gb18030.copyAscii(Unit, dst[o..][0..ascii], src[i..][0..ascii]);
-                i += ascii;
-                o += ascii;
+        while (i < src.len) {
+            const b = src[i];
+            if (b < 0x80) {
+                if (src.len - i >= codec.ascii_block and dst.len - o >= codec.ascii_block) {
+                    const n = gb18030.asciiRun(Unit, src[i..], dst[o..]);
+                    i += n;
+                    o += n;
+                    continue;
+                }
+                if (o == dst.len) return .{ .status = .output_full, .read = i, .written = o };
+                dst[o] = b;
+                i += 1;
+                o += 1;
+                continue;
             }
-            const end = @min(src.len, i + codec.ascii_block);
-            while (i < end) {
-                const b = src[i];
-                if (b < 0x80) {
-                    if (o == dst.len) return .{ .status = .output_full, .read = i, .written = o };
-                    dst[o] = b;
-                    i += 1;
-                    o += 1;
-                    continue;
-                }
-                if (b == 0x80 or b == 0xFF) {
-                    if (mode == .fatal) return .{ .status = .malformed, .read = i + 1, .written = o };
-                    o += codec.tryPut(Unit, dst, o, codec.replacement_character) orelse
-                        return .{ .status = .output_full, .read = i, .written = o };
-                    i += 1;
-                    continue;
-                }
-                if (i + 1 == src.len) {
-                    if (!last) {
-                        d.lead = b;
-                        return .{ .status = .input_empty, .read = src.len, .written = o };
+            // A two-byte sequence with one code point, the common case.
+            if (b != 0x80 and b != 0xFF and src.len - i >= 2) {
+                const t = src[i + 1];
+                if ((t >= 0x40 and t <= 0x7E) or (t >= 0xA1 and t <= 0xFE)) {
+                    const offset: u32 = if (t < 0x7F) 0x40 else 0x62;
+                    // The four pointers with two code points have no index entry.
+                    if (index.decode((@as(u32, b) - 0x81) * 157 + (t - offset))) |cp| {
+                        o += codec.tryPut(Unit, dst, o, cp) orelse
+                            return .{ .status = .output_full, .read = i, .written = o };
+                        i += 2;
+                        continue;
                     }
-                    if (mode == .fatal) return .{ .status = .malformed, .read = src.len, .written = o };
-                    o += codec.tryPut(Unit, dst, o, codec.replacement_character) orelse
-                        return .{ .status = .output_full, .read = i, .written = o };
-                    return .{ .status = .input_empty, .read = src.len, .written = o };
                 }
-                const r = put(Unit, dst, o, b, src[i + 1], mode) orelse
-                    return .{ .status = .output_full, .read = i, .written = o };
-                i += r.read;
-                o += r.written;
-                if (r.err and mode == .fatal) return .{ .status = .malformed, .read = i, .written = o };
             }
-            if (i >= src.len) return .{ .status = .input_empty, .read = src.len, .written = o };
+            var at: Pos = .{ .i = i, .o = o };
+            if (d.slowStep(Unit, src, dst, last, mode, &at)) |r| return r;
+            i = at.i;
+            o = at.o;
         }
+        return .{ .status = .input_empty, .read = src.len, .written = o };
+    }
+
+    const Pos = struct { i: usize, o: usize };
+
+    /// The standard's steps on the bytes at `src[at.i]`, `src[at.i] >= 0x80`,
+    /// everything the two-byte path does not take, out of line. Moves `at`
+    /// past them, or returns the call's result.
+    noinline fn slowStep(
+        d: *Decoder,
+        comptime Unit: type,
+        src: []const u8,
+        dst: []Unit,
+        last: bool,
+        mode: codec.DecoderMode,
+        at: *Pos,
+    ) ?DecodeResult {
+        const i = at.i;
+        const o = at.o;
+        const b = src[i];
+        if (b == 0x80 or b == 0xFF) {
+            if (mode == .fatal) return .{ .status = .malformed, .read = i + 1, .written = o };
+            at.o += codec.tryPut(Unit, dst, o, codec.replacement_character) orelse
+                return .{ .status = .output_full, .read = i, .written = o };
+            at.i += 1;
+            return null;
+        }
+        if (i + 1 == src.len) {
+            if (!last) {
+                d.lead = b;
+                return .{ .status = .input_empty, .read = src.len, .written = o };
+            }
+            if (mode == .fatal) return .{ .status = .malformed, .read = src.len, .written = o };
+            const n = codec.tryPut(Unit, dst, o, codec.replacement_character) orelse
+                return .{ .status = .output_full, .read = i, .written = o };
+            return .{ .status = .input_empty, .read = src.len, .written = o + n };
+        }
+        const r = put(Unit, dst, o, b, src[i + 1], mode) orelse
+            return .{ .status = .output_full, .read = i, .written = o };
+        at.i += r.read;
+        at.o += r.written;
+        if (r.err and mode == .fatal) return .{ .status = .malformed, .read = at.i, .written = at.o };
+        return null;
     }
 
     const Put = struct { read: usize, written: usize, err: bool };
@@ -153,6 +187,11 @@ pub const Decoder = struct {
     }
 };
 
+/// `codec.putNcr`, out of line.
+noinline fn putNcr(dst: []u8, o: usize, cp: u21) ?usize {
+    return codec.putNcr(dst, o, cp);
+}
+
 pub const Encoder = struct {
     pub fn init(e: Encoding) Encoder {
         _ = e;
@@ -171,45 +210,42 @@ pub const Encoder = struct {
         _ = last;
         var i: usize = 0;
         var o: usize = 0;
-        while (true) {
-            const room = @min(src.len - i, dst.len - o);
-            const ascii = gb18030.asciiUnits(Unit, src[i..][0..room]);
-            if (ascii != 0) {
-                gb18030.narrowAscii(Unit, dst[o..][0..ascii], src[i..][0..ascii]);
-                i += ascii;
-                o += ascii;
-            }
-            const end = @min(src.len, i + codec.ascii_block);
-            while (i < end) {
-                const c = src[i];
-                if (c < 0x80) {
-                    if (o == dst.len) return .{ .status = .output_full, .read = i, .written = o };
-                    dst[o] = @intCast(c);
-                    i += 1;
-                    o += 1;
+        while (i < src.len) {
+            const c = src[i];
+            if (c < 0x80) {
+                if (src.len - i >= codec.ascii_block and dst.len - o >= codec.ascii_block) {
+                    const n = gb18030.asciiRunOut(Unit, src[i..], dst[o..]);
+                    i += n;
+                    o += n;
                     continue;
                 }
-                const s = codec.readScalar(Unit, src, i);
-                if (index.encode(s.cp)) |pointer| {
-                    if (dst.len - o < 2) return .{ .status = .output_full, .read = i, .written = o };
-                    const trail: u8 = @intCast(pointer % 157);
-                    const offset: u8 = if (trail < 0x3F) 0x40 else 0x62;
-                    dst[o] = @intCast(pointer / 157 + 0x81);
-                    dst[o + 1] = trail + offset;
-                    o += 2;
-                } else {
-                    if (mode == .fatal) return .{
-                        .status = .unmappable,
-                        .read = i + s.len,
-                        .written = o,
-                        .unmappable = s.cp,
-                    };
-                    o += codec.putNcr(dst, o, s.cp) orelse return .{ .status = .output_full, .read = i, .written = o };
-                }
-                i += s.len;
+                if (o == dst.len) return .{ .status = .output_full, .read = i, .written = o };
+                dst[o] = @intCast(c);
+                i += 1;
+                o += 1;
+                continue;
             }
-            if (i == src.len) return .{ .status = .input_empty, .read = i, .written = o };
+            const s = gb18030.readScalar(Unit, src, i);
+            const cp: u21 = @intCast(s.cp);
+            if (index.encode(cp)) |pointer| {
+                if (dst.len - o < 2) return .{ .status = .output_full, .read = i, .written = o };
+                const trail: u8 = @intCast(pointer % 157);
+                const offset: u8 = if (trail < 0x3F) 0x40 else 0x62;
+                dst[o..][0..2].* = .{ @intCast(pointer / 157 + 0x81), trail + offset };
+                i += s.len;
+                o += 2;
+                continue;
+            }
+            if (mode == .fatal) return .{
+                .status = .unmappable,
+                .read = i + s.len,
+                .written = o,
+                .unmappable = cp,
+            };
+            o += putNcr(dst, o, cp) orelse return .{ .status = .output_full, .read = i, .written = o };
+            i += s.len;
         }
+        return .{ .status = .input_empty, .read = i, .written = o };
     }
 
     pub fn maxLen(e: *const Encoder, comptime Unit: type, n: usize, mode: codec.EncoderMode) ?usize {
