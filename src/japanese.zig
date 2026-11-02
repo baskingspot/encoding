@@ -110,22 +110,6 @@ inline fn eucStep(s: []const u8) Step {
     return .{ .cp = err, .len = 2 };
 }
 
-/// Writes `cp`, from U+0080 to U+FFFF, at `dst[o..]`, which has room for
-/// it, and returns the units written: index jis0208's code points, without
-/// `codec.put`'s branches for the lengths they never have.
-inline fn putBmp(comptime Unit: type, dst: []Unit, o: usize, cp: u32) usize {
-    if (Unit == u16) {
-        dst[o] = @intCast(cp);
-        return 1;
-    }
-    if (cp < 0x800) {
-        dst[o..][0..2].* = .{ @intCast(0xC0 | cp >> 6), @intCast(0x80 | (cp & 0x3F)) };
-        return 2;
-    }
-    dst[o..][0..3].* = .{ @intCast(0xE0 | cp >> 12), @intCast(0x80 | (cp >> 6 & 0x3F)), @intCast(0x80 | (cp & 0x3F)) };
-    return 3;
-}
-
 /// Shift_JIS's common case for the fast path: the code point of a lead
 /// byte `b` (from 0x81) and a trail byte `t` in index jis0208, or 0 for
 /// anything else, which `sjisStep` decodes. (A plain integer: an optional
@@ -383,7 +367,9 @@ pub const Decoder = struct {
                 }
                 const cp = pair(b, src[i + 1]);
                 if (cp == 0) break;
-                o += putBmp(Unit, dst, o, cp);
+                // Below `limit` the room is there: the slice tells
+                // `putBmp` so, and its checks fold away.
+                o += codec.putBmp(Unit, dst[0 .. o + per], o, cp);
                 i += 2;
             }
             if (i == src.len) return .{ .status = .input_empty, .read = i, .written = o };

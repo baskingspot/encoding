@@ -49,26 +49,6 @@ fn lastAtMost(items: []const u16, x: u32) usize {
     return lo;
 }
 
-/// Writes `cp`, an index gb18030 code point, at `dst[o..]` and returns the
-/// units written, or 0 when it does not fit. Every index code point is
-/// from U+00A4 to U+FFE5: one UTF-16 unit, or two or three UTF-8 bytes.
-/// Not an optional: LLVM merges the two paths of one through memory.
-inline fn putIndex(comptime Unit: type, dst: []Unit, o: usize, cp: u32) usize {
-    if (Unit == u16) {
-        if (o == dst.len) return 0;
-        dst[o] = @intCast(cp);
-        return 1;
-    }
-    if (cp < 0x800) {
-        if (dst.len - o < 2) return 0;
-        dst[o..][0..2].* = .{ @intCast(0xC0 | cp >> 6), @intCast(0x80 | (cp & 0x3F)) };
-        return 2;
-    }
-    if (dst.len - o < 3) return 0;
-    dst[o..][0..3].* = .{ @intCast(0xE0 | cp >> 12), @intCast(0x80 | (cp >> 6 & 0x3F)), @intCast(0x80 | (cp & 0x3F)) };
-    return 3;
-}
-
 /// What the decoder makes of the bytes at the start of a stream.
 const Step = union(enum) {
     /// A code point from the first `len` bytes.
@@ -161,7 +141,7 @@ pub const Decoder = struct {
                     const offset: u32 = if (b2 < 0x7F) 0x40 else 0x41;
                     const cp = index.decode((@as(u32, b) - 0x81) * 190 + (b2 - offset));
                     if (cp != 0) {
-                        const n = putIndex(Unit, dst, o, cp);
+                        const n = codec.putBmp(Unit, dst, o, cp);
                         if (n == 0) return .{ .status = .output_full, .read = i, .written = o };
                         i += 2;
                         o += n;

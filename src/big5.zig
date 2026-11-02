@@ -49,19 +49,7 @@ inline fn putIndex(comptime Unit: type, dst: []Unit, o: usize, cp: u32) usize {
         if (dst.len - o < 4 / @sizeOf(Unit)) return 0;
         return codec.put(Unit, dst, o, @intCast(cp));
     }
-    if (Unit == u16) {
-        if (o == dst.len) return 0;
-        dst[o] = @intCast(cp);
-        return 1;
-    }
-    if (cp < 0x800) {
-        if (dst.len - o < 2) return 0;
-        dst[o..][0..2].* = .{ @intCast(0xC0 | cp >> 6), @intCast(0x80 | (cp & 0x3F)) };
-        return 2;
-    }
-    if (dst.len - o < 3) return 0;
-    dst[o..][0..3].* = .{ @intCast(0xE0 | cp >> 12), @intCast(0x80 | (cp >> 6 & 0x3F)), @intCast(0x80 | (cp & 0x3F)) };
-    return 3;
+    return codec.putBmp(Unit, dst, o, cp);
 }
 
 pub const Decoder = struct {
