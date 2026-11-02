@@ -34,11 +34,7 @@ const impls = .{
     .japanese_hash = @import("layouts/japanese_hash.zig"), // ziglint-ignore: Z028
 
     // Wave 1, Chinese: its layouts.
-    .chinese_ranged = @import("layouts/chinese_ranged.zig"), // ziglint-ignore: Z028
-    .chinese_hash = @import("layouts/chinese_hash.zig"), // ziglint-ignore: Z028
     .chinese_rank = @import("layouts/chinese_rank.zig"), // ziglint-ignore: Z028
-    .chinese_paged = @import("layouts/chinese_paged.zig"), // ziglint-ignore: Z028
-    .chinese_scan = @import("layouts/chinese_scan.zig"), // ziglint-ignore: Z028
 };
 
 pub const Layout = std.meta.FieldEnum(@TypeOf(impls));

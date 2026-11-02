@@ -27,7 +27,9 @@ between table bytes and encode speed; see the recommendation.
 
 Each is a generator under `gen/layouts/` that writes the same interface
 (`decode(pointer) ?u21`, `encode(cp) ?u16`), so the codecs do not change
-between them. They are built from halves in `gen/layouts/chinese_parts.zig`.
+between them. They were built from halves in `gen/layouts/chinese_parts.zig`;
+only `chinese_rank` stays in the tree, and `git log -- gen/layouts/chinese_parts.zig`
+finds the others.
 
 | Layout           | Decode table                                                                                                                                                                                                     | Encode lookup                                                                                                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
