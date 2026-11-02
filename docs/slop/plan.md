@@ -75,8 +75,8 @@ every buffer.
 ## Dependencies
 
 - `baskingspot/utf`: UTF-8 and UTF-16 validation, conversion, and length
-  are utf's, through its module, pinned by commit in `build.zig.zon` until
-  utf tags a release (decision 3).
+  are utf's, through its module, pinned to its v0.1.0 release in
+  `build.zig.zon` (decision 3).
 - `testingx` for tests.
 
 ## Testing
@@ -183,11 +183,10 @@ not listed, including `src/utf8.zig`, `src/utf16.zig`, and
 `build.zig.zon` (the utf repin), the harness cores, the flake, CI, and this
 file.
 
-- **Korean** (branch `wave1-korean`): EUC-KR, both directions, on the
-  `japanese_paged` decode layout and rank encode (decisions 1 and 2).
-  `src/euc_kr.zig`, `src/tables/euc_kr.zig`, its results files, and its
-  lines in the Korean slots of `src/codecs.zig` and `gen/sources.zig`, its
-  FAIL line in `test/wpt/expectations.txt`, and a CHANGELOG bullet.
+- **Korean** (landed at `e4bbf6e`; korean-20261102.md): EUC-KR on the
+  `chinese_rank` layout. Decode 1.23x and 1.28x encoding_rs geomean (to
+  UTF-8 and UTF-16), encode 3.5x and 4.7x; 16-byte decode 0.72x, in the
+  shared decoder path. Table 89,094 bytes against encoding_rs's 21,770.
 - **Core and IBM** (branch `wave1-core`): the shared codec pieces and the
   IBM code pages. `src/codec.zig`, `src/Decoder.zig`, `src/Encoder.zig`,
   `src/single_byte.zig`, `src/japanese.zig`, `src/gb18030.zig`,
@@ -211,10 +210,17 @@ file.
    42,040 bytes), and `japanese_paged` is 692 and 34,403 bytes larger and
    2-7% slower to decode. **Verdict** (owner agreed on paged for Japanese):
    paged decode where pages save bytes (jis0208, jis0212, euc_kr), flat with
-   the plane-2 bit where they do not (gb18030, Big5). Whatever the layout, never merge
+   the plane-2 bit where they do not (gb18030, Big5). Korean measured
+   (korean-20261102.md): on euc_kr pages save 6,334 bytes (41,166 against
+   47,500) but decode 5% slower geomean and 7-11% slower on Korean text, so
+   euc_kr takes flat decode. **Verdict amended:** paged for jis0208 and
+   jis0212; flat for gb18030, Big5, and euc_kr. Whatever the layout, never merge
    two branches into an optional or a struct holding a `u21`: LLVM routes
    it through memory, a store-forwarding stall per character. Return early,
-   or use `u32`.
+   or use `u32`. The same holds for any optional in a hot loop:
+   `codec.tryPut`'s `?usize` and a captured `?u21` from a table's `decode`
+   both go through the stack every character. Unwrap at once (`orelse 0`),
+   or return an integer with a sentinel.
 2. **Encoder lookups.** Encoding to a CJK encoding needs a reverse map from
    code point to bytes: a search over the decode table, a generated
    perfect hash, or a ranged reverse table. Same two-sided measurement.
@@ -225,19 +231,17 @@ file.
    against 7-9x for a perfect hash, 4-5x for bisection, and 1-2x for a
    vector scan of the decode table, which would save 95,808 bytes.
    **Verdict:** rank, everywhere.
-3. **Sharing with utf.** Settled in wave 0: depend on utf's module, pinned
-   by commit (`9b4dcff`, untagged). Its public `validate`, `convert`, and
+3. **Sharing with utf.** Settled in wave 0: depend on utf's module, now
+   pinned to its v0.1.0 release. Its public `validate`, `convert`, and
    `length` cover the UTF-8 and UTF-16 codecs, and its runtime x86-64
    dispatch comes with them; `simd.zig` is not exported and is utf's
    internals, so vendoring it would fork the dispatch and the kernels for
    no gain, and the ASCII runs a legacy codec needs are a few lines of
-   `@Vector` code in `src/codec.zig`. Costs: on an error the UTF-8 and
-   UTF-16 decoders call `utf.length` to recount the output written so far,
-   because utf's checked conversions return the input offset only; and
-   utf does not build for 32-bit targets (fixed on utf branch
-   `encoding-32bit`, which is also why the WPT harness builds wasm64).
-   Asked of utf: merge that branch, return the output count with a checked
-   conversion's error, and tag a release to pin instead of a commit.
+   `@Vector` code in `src/codec.zig`. utf v0.1.0 builds for 32-bit targets
+   and its checked conversions return a `ConvertResult` whose `written` is
+   the output before an error, so the UTF-8 and UTF-16 codecs no longer
+   recount with `utf.length`. The WPT harness stays on wasm64 because
+   testingx v0.4.0's runner does not build for WASI; utf itself would.
 4. **UTF-16 output.** Whether `decodeToUtf16` gets SIMD paths of its own or
    goes through UTF-8, judged by how often callers on Windows and JavaScript
    hosts would use it.
