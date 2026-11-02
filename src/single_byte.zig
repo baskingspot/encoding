@@ -49,7 +49,11 @@ fn longestRun(comptime table: *const Table) Run {
     while (p < 128) {
         var n: usize = 1;
         while (p + n < 128 and table[p] != 0 and table[p + n] == table[p] + n) n += 1;
-        if (table[p] != 0 and n > best.len) best = .{ .cp = table[p], .byte = 0x80 + p, .len = n };
+        // Less the C1 controls, U+0080 to U+009F, which the ISO-8859
+        // tables map to themselves in a run longer than their script's
+        // letters, and which text does not use.
+        const c1: usize = if (table[p] >= 0x80 and table[p] < 0xA0) @min(n, 0xA0 - table[p]) else 0;
+        if (table[p] != 0 and n - c1 > best.len) best = .{ .cp = table[p] + c1, .byte = 0x80 + p + c1, .len = n - c1 };
         p += n;
     }
     // The run gives each of its code points its first byte only if none of
