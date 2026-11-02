@@ -1,9 +1,9 @@
-//! UTF-16BE and UTF-16LE: the standard's shared UTF-16 decoder. Runs of
-//! code units with no unpaired surrogate are copied 32 and then eight
-//! units at a time in registers (byte-swapped when the byte order is not
-//! the machine's) while they hold no surrogate, to UTF-16, and while they
-//! are ASCII, to UTF-8; the rest go through baskingspot/utf a window of 256 units at a
-//! time (to UTF-8, transcoded; to UTF-16, validated). Each unpaired
+//! UTF-16BE and UTF-16LE: the standard's shared UTF-16 decoder. To
+//! UTF-16, units are copied in registers (byte-swapped when the byte order
+//! is not the machine's), 32 at a time while they hold no surrogate and
+//! eight at a time with their pairs checked; to UTF-8, ASCII units are
+//! narrowed 32 and then eight at a time, and the rest go through
+//! baskingspot/utf a window of 256 units at a time. Each unpaired
 //! surrogate and each unit split across calls goes through the standard's
 //! algorithm here. Neither has an encoder: their output encoding is UTF-8.
 
@@ -16,7 +16,6 @@ const DecodeResult = codec.DecodeResult;
 pub const encodings = [_]Encoding{ .utf_16be, .utf_16le };
 
 const little = codec.native_endian == .little;
-const validate_native = if (little) utf.validate.utf16leWithErrors else utf.validate.utf16beWithErrors;
 
 inline fn isLead(u: u16) bool {
     return u >= 0xD800 and u <= 0xDBFF;
@@ -142,42 +141,34 @@ pub const Decoder = struct {
 
     const Bulk = struct { read: usize, written: usize };
 
-    /// The units `bulk` hands utf at a time.
+    /// The units `bulk` hands utf at a time, to UTF-8.
     const window = 256;
 
     /// Whole units from the start of `src`, up to the first unpaired
-    /// surrogate, the end of the units that fit, or a window's end. Called
-    /// only between units, with no surrogate pending.
+    /// surrogate (or the block it is in), the end of the units that fit,
+    /// or a window's end. Called only between units, with no surrogate
+    /// pending.
     fn bulk(d: *const Decoder, comptime Unit: type, src: []const u8, dst: []Unit) Bulk {
         if (Unit == u16) {
-            // 32, then eight, units at a time while they hold no
-            // surrogate, copied (and swapped) in registers: no call, which
-            // short inputs feel.
+            // 32 units at a time while they hold no surrogate, and eight
+            // at a time with pairs checked in registers, copied (and
+            // swapped) with no call, which short inputs feel.
             const n = @min(src.len / 2, dst.len);
             var k: usize = 0;
-            while (n - k >= 32) {
-                const u = d.load(32, src[2 * k ..][0..64]);
-                if (anySurrogate(32, u)) break;
-                dst[k..][0..32].* = u;
-                k += 32;
-            }
             while (n - k >= 8) {
+                if (n - k >= 32) {
+                    const w = d.load(32, src[2 * k ..][0..64]);
+                    if (!anySurrogate(32, w)) {
+                        dst[k..][0..32].* = w;
+                        k += 32;
+                        continue;
+                    }
+                }
                 const u = d.load(8, src[2 * k ..][0..16]);
-                if (anySurrogate(8, u)) break;
                 dst[k..][0..8].* = u;
-                k += 8;
+                k += pairedUnits(u) orelse break;
             }
-            if (n - k < 8) return .{ .read = 2 * k, .written = k };
-            // Surrogates: a window through utf, which checks pairs in bulk.
-            const m: usize = @min(n - k, window);
-            const units = dst[k..][0..m];
-            @memcpy(std.mem.sliceAsBytes(units), src[2 * k ..][0 .. 2 * m]);
-            if (d.big_endian == little) {
-                for (units) |*u| u.* = @byteSwap(u.*);
-            }
-            const r = validate_native(units);
-            const good = k + if (r.err == .none) m else r.count;
-            return .{ .read = 2 * good, .written = good };
+            return .{ .read = 2 * k, .written = k };
         }
         // ASCII 32, then eight, units at a time, narrowed in registers.
         var k: usize = 0;
@@ -236,6 +227,23 @@ pub const Decoder = struct {
         return @reduce(.Or, u & @as(U, @splat(0xF800)) == @as(U, @splat(0xD800)));
     }
 
+    /// How many of the eight units `u`, which follow no leading
+    /// surrogate, are well-formed UTF-16: 8, or 7 when the last is a
+    /// leading surrogate, whose pair the next block checks; null when a
+    /// surrogate in them is unpaired.
+    inline fn pairedUnits(u: @Vector(8, u16)) ?usize {
+        const U = @Vector(8, u16);
+        const top = u & @as(U, @splat(0xFC00));
+        const lead = top == @as(U, @splat(0xD800));
+        const trail = top == @as(U, @splat(0xDC00));
+        // Each lane's trailing surrogate must follow a leading one, and
+        // each leading one but the last must precede a trailing one.
+        const none: @Vector(8, bool) = @splat(false);
+        const after_lead = @shuffle(bool, lead, none, @Vector(8, i32){ -1, 0, 1, 2, 3, 4, 5, 6 });
+        if (@reduce(.Or, trail != after_lead)) return null;
+        return if (lead[7]) 7 else 8;
+    }
+
     pub fn maxLen(d: *const Decoder, comptime Unit: type, n: usize) ?usize {
         const bytes = std.math.add(usize, n, @intFromBool(d.lead_byte != null)) catch return null;
         // A unit each, a pending surrogate's error or pair, and half a
@@ -281,17 +289,28 @@ test "a pair split across calls, and fatal positions" {
     );
 }
 
-test "a window of units with surrogates, longer than utf takes at once" {
-    // 'a' x 8, then a pair and 'b' x 400: the pair sends the units after
-    // the first block to utf a window at a time.
-    var src: [2 * 410]u8 = undefined;
-    for (0..410) |k| src[2 * k ..][0..2].* = .{ 'b', 0 };
-    for (0..8) |k| src[2 * k] = 'a';
-    src[16..20].* = .{ 0x3d, 0xd8, 0x00, 0xde };
+test "pairs in and across blocks, and unpaired surrogates, to UTF-16" {
+    // 'a' x 7, a pair across the first two blocks, 'b' x 30, a pair in
+    // a block, an unpaired trailing surrogate, then 'c' x 40.
+    var units: [7 + 2 + 30 + 2 + 1 + 40]u16 = undefined;
+    @memset(&units, 'c');
+    @memset(units[0..7], 'a');
+    units[7..9].* = .{ 0xD83D, 0xDE00 };
+    @memset(units[9..39], 'b');
+    units[39..41].* = .{ 0xD83D, 0xDE01 };
+    units[41] = 0xDC00;
+    var src: [2 * units.len]u8 = undefined;
+    for (units, 0..) |u, k| src[2 * k ..][0..2].* = .{ @truncate(u), @intCast(u >> 8) };
     var le = Decoder.init(.utf_16le);
-    var out: [410]u16 = undefined;
-    const r = le.decode(u16, &src, &out, true, .fatal);
-    try testing.expectEqual(DecodeResult{ .status = .input_empty, .read = 820, .written = 410 }, r);
-    try testing.expectEqualSlices(u16, &.{ 'a', 0xD83D, 0xDE00, 'b' }, out[7..11]);
-    try testing.expectEqual(@as(u16, 'b'), out[409]);
+    var out: [units.len]u16 = undefined;
+    const r = le.decode(u16, &src, &out, true, .replacement);
+    try testing.expectEqual(DecodeResult{ .status = .input_empty, .read = src.len, .written = units.len }, r);
+    var want = units;
+    want[41] = 0xFFFD;
+    try testing.expectEqualSlices(u16, &want, &out);
+    var f = Decoder.init(.utf_16le);
+    try testing.expectEqual(
+        DecodeResult{ .status = .malformed, .read = 84, .written = 41 },
+        f.decode(u16, &src, &out, true, .fatal),
+    );
 }
