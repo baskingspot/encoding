@@ -232,7 +232,9 @@ everything not listed.
   ISO-2022-JP replaces errors in its ASCII loop; `japanese.zig` has
   `decodeAs` and `encodeAs`. gb18030 and euc_kr generate in `flat_runs`:
   tables 333,073 to 307,099 bytes (2.47x encoding_rs). CJK rows below
-  encoding_rs fell from 50 to 18.
+  encoding_rs fell from 50 to 18. The owner kept `flat_runs` for gb18030:
+  20.7 KB smaller for GBK and gb18030 encode at 0.87-0.90x, still
+  13-15.7x encoding_rs.
 
 ## Decisions to measure
 
