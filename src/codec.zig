@@ -126,6 +126,25 @@ pub inline fn tryPut(comptime Unit: type, dst: []Unit, o: usize, cp: u21) ?usize
     return put(Unit, dst, o, cp);
 }
 
+/// Writes `cp`, a code point from U+0080 to U+FFFF, at `dst[o..]` if it
+/// fits, and returns the units written, or 0 when it does not fit: no
+/// optional to carry through a decoder's hot loop.
+pub inline fn putBmp(comptime Unit: type, dst: []Unit, o: usize, cp: u32) usize {
+    if (Unit == u16) {
+        if (o == dst.len) return 0;
+        dst[o] = @intCast(cp);
+        return 1;
+    }
+    if (cp < 0x800) {
+        if (dst.len - o < 2) return 0;
+        dst[o..][0..2].* = .{ @intCast(0xC0 | cp >> 6), @intCast(0x80 | (cp & 0x3F)) };
+        return 2;
+    }
+    if (dst.len - o < 3) return 0;
+    dst[o..][0..3].* = .{ @intCast(0xE0 | cp >> 12), @intCast(0x80 | (cp >> 6 & 0x3F)), @intCast(0x80 | (cp & 0x3F)) };
+    return 3;
+}
+
 /// The longest numeric character reference, `&#1114111;`.
 pub const max_ncr_len = 10;
 
@@ -561,6 +580,17 @@ test "putNcr writes the shortest decimal" {
     try std.testing.expectEqualStrings("&#8364;", buf[0..putNcr(&buf, 0, 0x20AC).?]);
     try std.testing.expectEqualStrings("&#1114111;", buf[0..putNcr(&buf, 0, 0x10FFFF).?]);
     try std.testing.expectEqual(@as(?usize, null), putNcr(buf[0..6], 0, 0x20AC));
+}
+
+test "putBmp writes two or three bytes, or nothing when they do not fit" {
+    var buf: [4]u8 = undefined;
+    try std.testing.expectEqualStrings("\xDF\xBF", buf[0..putBmp(u8, &buf, 0, 0x7FF)]);
+    try std.testing.expectEqualStrings("\xE0\xA0\x80", buf[0..putBmp(u8, &buf, 0, 0x800)]);
+    try std.testing.expectEqual(@as(usize, 0), putBmp(u8, &buf, 2, 0x800));
+    try std.testing.expectEqual(@as(usize, 2), putBmp(u8, &buf, 2, 0x7FF));
+    var units: [1]u16 = undefined;
+    try std.testing.expectEqual(@as(usize, 1), putBmp(u16, &units, 0, 0xFFFF));
+    try std.testing.expectEqual(@as(usize, 0), putBmp(u16, &units, 1, 0xFFFF));
 }
 
 test "utf8Step follows the standard's maximal subparts" {
