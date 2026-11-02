@@ -194,6 +194,15 @@ file.
   `gen/sources.zig` except Korean's line, `test/tables.zig`, the
   `bench-rodata` code, and its results files.
 
+- **Compile-time decoders** (branch `wave1-comptime`): a decoder and
+  encoder specialized at compile time to one encoding, so a program that
+  uses one links only that encoding's code and tables
+  (link-size-20261102.md). New files only: `docs/slop/comptime.md`, its
+  prototype under `src/` in files it creates, its tests and bench rows in
+  files it creates, and its results files. Changes to `Decoder.zig`,
+  `Encoder.zig`, `root.zig`, or the harnesses come as requests in its
+  report, after the core orb lands.
+
 ## Decisions to measure
 
 1. **Table layout.** encoding_rs compresses its CJK tables (ranges and
