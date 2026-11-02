@@ -373,11 +373,14 @@ pub inline fn read(comptime Unit: type, src: []const Unit, i: usize, comptime fi
                 const c1 = src[i + 1];
                 if (c1 & 0xC0 == 0x80) return .{ .cp = @as(u32, c & 0x1F) << 6 | (c1 & 0x3F), .len = 2 };
             }
-            // E0 and ED need narrower second bytes; the others take any.
-            if (n == 3 and c >= 0xE1 and c <= 0xEF and c != 0xED and src.len - i >= 3) {
+            // E0 needs second bytes from A0 (no overlong forms), ED up to
+            // 9F (no surrogates), the others any continuation byte; E0
+            // second, as only scripts below U+1000 have it.
+            if (n == 3 and src.len - i >= 3) {
                 const c1 = src[i + 1];
                 const c2 = src[i + 2];
-                if (c1 & 0xC0 == 0x80 and c2 & 0xC0 == 0x80) {
+                const tail = c1 & 0xC0 == 0x80 and c2 & 0xC0 == 0x80;
+                if ((c >= 0xE1 and c <= 0xEF and c != 0xED and tail) or (c == 0xE0 and c1 >= 0xA0 and tail)) {
                     return .{ .cp = @as(u32, c & 0xF) << 12 | @as(u32, c1 & 0x3F) << 6 | (c2 & 0x3F), .len = 3 };
                 }
             }
