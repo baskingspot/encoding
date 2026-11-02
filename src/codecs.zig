@@ -45,6 +45,7 @@ pub const families = .{
     .big5 = @import("big5.zig"), // ziglint-ignore: Z028
 
     // Wave 1, Korean: EUC-KR.
+    .euc_kr = @import("euc_kr.zig"), // ziglint-ignore: Z028
 };
 
 const family_fields = @typeInfo(@TypeOf(families)).@"struct".fields;
