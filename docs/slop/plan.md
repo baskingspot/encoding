@@ -163,17 +163,8 @@ Wave 0 (landed at `66f644c`): `Encoding` and labels, the `Decoder` and
 single-byte encodings, the vendored indexes and WPT tests, the table
 generator, and the fuzz, oracle, WPT, and benchmark harnesses.
 
-Wave 1, Japanese and Chinese, two orbs in parallel. Each owns the files
-`adding-an-encoding.md` assigns its family, adds one line in its family's
-slot of each shared registry and a CHANGELOG bullet, and writes its
-decision 1 and 2 measurements in `docs/slop/results/`. A layout either orb
-adds is named for its family (`gen/layouts/japanese_<layout>.zig`,
-`gen/layouts/chinese_<layout>.zig`) so the two never collide; the
-orchestrating thread records the verdict here when both land, and Korean
-consolidates on the winner. The orchestrating thread owns everything else,
-including the shared `src/` files (`codec.zig`, `Decoder.zig`,
-`Encoder.zig`, `encoding.zig`, `root.zig`), the harness cores, `build.zig`,
-the justfile, the flake, CI, and this file.
+Wave 1, Japanese and Chinese (both landed). Each orb owned its family's
+files, added one line per registry, and measured decisions 1 and 2.
 
 - **Japanese** (landed at `96e0808`; japanese-20261102.md,
   japanese-tables-20261102.md): Shift_JIS, EUC-JP, and ISO-2022-JP, on the
@@ -181,9 +172,28 @@ the justfile, the flake, CI, and this file.
   0.93x at 16 bytes and 2.3x at 1 MiB; encode 5-7x, because encoding_rs's
   default build encodes kanji by linear scan. Tables 50,005 bytes against
   encoding_rs's 26,262 (68,056 with its fast kanji encode).
-- **Chinese** (branch `wave1-chinese`): GBK, gb18030, and Big5;
-  `src/gb18030.zig`, `src/big5.zig`, the `src/tables/` files for gb18030,
-  its four-byte ranges, and big5, its layouts, and its results files.
+- **Chinese** (landed at `21277d8`; chinese-codecs-20261102.md,
+  chinese-layouts-20261102.md): GBK, gb18030, and Big5, on the
+  `chinese_rank` layout. Decode 1.02-1.38x encoding_rs geomean, encode
+  12-19x, because encoding_rs encodes by searching its decode tables.
+  Tables 186,552 bytes against encoding_rs's 69,526.
+
+Wave 1b, two orbs in parallel. The orchestrating thread owns everything
+not listed, including `src/utf8.zig`, `src/utf16.zig`, and
+`build.zig.zon` (the utf repin), the harness cores, the flake, CI, and this
+file.
+
+- **Korean** (branch `wave1-korean`): EUC-KR, both directions, on the
+  `japanese_paged` decode layout and rank encode (decisions 1 and 2).
+  `src/euc_kr.zig`, `src/tables/euc_kr.zig`, its results files, and its
+  lines in the Korean slots of `src/codecs.zig` and `gen/sources.zig`, its
+  FAIL line in `test/wpt/expectations.txt`, and a CHANGELOG bullet.
+- **Core and IBM** (branch `wave1-core`): the shared codec pieces and the
+  IBM code pages. `src/codec.zig`, `src/Decoder.zig`, `src/Encoder.zig`,
+  `src/single_byte.zig`, `src/japanese.zig`, `src/gb18030.zig`,
+  `src/big5.zig`, `gen/layouts.zig`, `gen/layouts/`, `gen/main.zig`,
+  `gen/sources.zig` except Korean's line, `test/tables.zig`, the
+  `bench-rodata` code, and its results files.
 
 ## Decisions to measure
 
@@ -194,8 +204,14 @@ the justfile, the flake, CI, and this file.
    Japanese measured (japanese-tables-20261102.md): `japanese_paged`, pages
    of 32 to 128 entries behind a page index with empty pages shared,
    decodes at 0.95 ns a lookup against 0.80 for flat, and jis0208 is 29%
-   smaller; ranged is 2x slower to decode for little saving. The verdict
-   waits for the Chinese measurements. Whatever the layout, never merge
+   smaller; ranged is 2x slower to decode for little saving. Chinese
+   measured (chinese-layouts-20261102.md): gb18030 and Big5 are dense, so
+   pages share nothing; a flat u16 decode array with a bit per pointer for
+   plane-2 code points is both smallest and fastest there (47,880 and
+   42,040 bytes), and `japanese_paged` is 692 and 34,403 bytes larger and
+   2-7% slower to decode. **Verdict** (owner agreed on paged for Japanese):
+   paged decode where pages save bytes (jis0208, jis0212, euc_kr), flat with
+   the plane-2 bit where they do not (gb18030, Big5). Whatever the layout, never merge
    two branches into an optional or a struct holding a `u21`: LLVM routes
    it through memory, a store-forwarding stall per character. Return early,
    or use `u32`.
@@ -205,6 +221,10 @@ the justfile, the flake, CI, and this file.
    Japanese measured: a 64-code-point bitmap per block with a popcount
    rank into packed pointers, 1.38 ns a lookup against 41 for bisection
    and 6 for a perfect hash, and 31% smaller than the flat encode table.
+   Chinese measured the same table, byte for byte: 12-19x encoding_rs,
+   against 7-9x for a perfect hash, 4-5x for bisection, and 1-2x for a
+   vector scan of the decode table, which would save 95,808 bytes.
+   **Verdict:** rank, everywhere.
 3. **Sharing with utf.** Settled in wave 0: depend on utf's module, pinned
    by commit (`9b4dcff`, untagged). Its public `validate`, `convert`, and
    `length` cover the UTF-8 and UTF-16 codecs, and its runtime x86-64
