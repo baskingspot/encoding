@@ -220,12 +220,16 @@ Wave 2, SIMD, two orbs in parallel beside the compile-time decoder orb.
 Neither edits `coder.zig` or `codecs.zig`. The orchestrating thread owns
 everything not listed.
 
-- **Single-byte and UTF-16** (branch `wave2-single-byte`): `src/codec.zig`
-  (the shared ASCII runs and readers), `src/single_byte.zig`,
-  `src/x_user_defined.zig`, `src/utf16.zig`, and its results files.
-  Loops whose speed does not depend on where the linker places them, the
-  single-byte UTF-16 non-ASCII encode path, x-user-defined's per-call cost,
-  and UTF-16LE's 16-byte decode.
+- **Single-byte and UTF-16** (landed at `2a7108f`;
+  single-byte-20261102.md): every loop goes a 16-byte block at a time;
+  across four code placements the median row varies 4.0% (14.5% before,
+  0.9% noise). Single-byte decode to UTF-16 looks a block up with
+  AVX-512BW `vpermi2w`, patching lanes elsewhere; the encoder maps ASCII
+  and the table's two longest runs (less the C1 controls) by arithmetic and
+  searches the rest. x-user-defined UTF-8 encode at 16 bytes 125.6 to 7.3
+  ns; UTF-16 decode at 16 bytes 19.5 to 9.4 ns, and linear on unpaired
+  surrogates. `codec.putBmp` writes a BMP code point with no optional, for
+  the CJK families. 3.49x encoding_rs over its 5,632 rows; 33 below.
 - **CJK** (landed at `d361067`; cjk-fast-paths-20261102.md,
   cjk-tables-20261102.md): Big5, GBK, and gb18030 decode write without
   `tryPut`'s optional; Shift_JIS and EUC-JP copy ASCII a block at a time;
@@ -287,7 +291,11 @@ everything not listed.
    Neither is in. CJK loops are bound by instructions (about six cycles a
    character), so a layout that adds two instructions to every lookup
    costs 5-10% whatever it saves in loads: put a layout's extra work on the
-   path of the characters that need it.
+   path of the characters that need it. Integer types bite in hot code:
+   `@min(x, N)` with a comptime N has the smallest type that holds N
+   (`@min(len, 256)` is a u9), and `@popCount` of a u16 is a u5, so give
+   the result a type; `a = .{ x, a[0] }` writes `a[0]` before reading it,
+   so go through a temporary.
 3. **Sharing with utf.** Settled in wave 0: depend on utf's module, now
    pinned to its v0.1.0 release. Its public `validate`, `convert`, and
    `length` cover the UTF-8 and UTF-16 codecs, and its runtime x86-64
