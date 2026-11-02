@@ -38,6 +38,7 @@ pub const families = .{
     .x_user_defined = @import("x_user_defined.zig"), // ziglint-ignore: Z028
 
     // Wave 1, Japanese: Shift_JIS, EUC-JP, ISO-2022-JP.
+    .japanese = @import("japanese.zig"), // ziglint-ignore: Z028
 
     // Wave 1, Chinese: GBK and gb18030, Big5.
 

@@ -77,7 +77,16 @@ pub const MultiByte = struct {
 /// The multi-byte tables committed under src/tables/. Wave 1 adds its own,
 /// one line each, after measuring the layouts, such as
 /// .{ .name = "jis0208", .file = "whatwg-encoding/index-jis0208.txt" },
-pub const multi_byte: []const MultiByte = &.{};
+pub const multi_byte: []const MultiByte = &.{
+    .{ .name = "jis0208", .file = "whatwg-encoding/index-jis0208.txt", .layout = .japanese_paged },
+    .{ .name = "jis0212", .file = "whatwg-encoding/index-jis0212.txt", .layout = .japanese_paged, .encode = false },
+    .{
+        .name = "iso_2022_jp_katakana",
+        .file = "whatwg-encoding/index-iso-2022-jp-katakana.txt",
+        .layout = .japanese_paged,
+        .encode = false,
+    },
+};
 
 /// Every multi-byte index in the standard, for `zig build test-layouts`,
 /// which generates each with every layout into the cache and checks it
