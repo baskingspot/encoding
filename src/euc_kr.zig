@@ -26,6 +26,26 @@ inline fn lookup(lead: u8, trail: u8) ?u21 {
     return index.decode((@as(u32, lead) - 0x81) * 190 + (trail - 0x41));
 }
 
+/// Writes `cp`, an index code point, at `dst[o..]` and returns the units
+/// written, or 0 when it does not fit. Every index code point is from
+/// U+00A1 to U+FFE6: one UTF-16 unit, or two or three UTF-8 bytes. Not an
+/// optional: LLVM merges the two paths of one through memory.
+inline fn putIndex(comptime Unit: type, dst: []Unit, o: usize, cp: u32) usize {
+    if (Unit == u16) {
+        if (o == dst.len) return 0;
+        dst[o] = @intCast(cp);
+        return 1;
+    }
+    if (cp < 0x800) {
+        if (dst.len - o < 2) return 0;
+        dst[o..][0..2].* = .{ @intCast(0xC0 | cp >> 6), @intCast(0x80 | (cp & 0x3F)) };
+        return 2;
+    }
+    if (dst.len - o < 3) return 0;
+    dst[o..][0..3].* = .{ @intCast(0xE0 | cp >> 12), @intCast(0x80 | (cp >> 6 & 0x3F)), @intCast(0x80 | (cp & 0x3F)) };
+    return 3;
+}
+
 pub const Decoder = struct {
     /// The standard's EUC-KR lead, 0 for none.
     lead: u8 = 0,
@@ -83,10 +103,14 @@ pub const Decoder = struct {
             if (b != 0x80 and b != 0xFF and src.len - i >= 2) {
                 const t = src[i + 1];
                 if (t >= 0x41 and t != 0xFF) {
-                    if (index.decode((@as(u32, b) - 0x81) * 190 + (t - 0x41))) |cp| {
-                        o += codec.tryPut(Unit, dst, o, cp) orelse
-                            return .{ .status = .output_full, .read = i, .written = o };
+                    // Unwrapped to a u32 at once: a captured `?u21` goes
+                    // through a stack slot on every character.
+                    const cp: u32 = index.decode((@as(u32, b) - 0x81) * 190 + (t - 0x41)) orelse 0;
+                    if (cp != 0) {
+                        const n = putIndex(Unit, dst, o, cp);
+                        if (n == 0) return .{ .status = .output_full, .read = i, .written = o };
                         i += 2;
+                        o += n;
                         continue;
                     }
                 }
