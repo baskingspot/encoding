@@ -175,10 +175,12 @@ including the shared `src/` files (`codec.zig`, `Decoder.zig`,
 `Encoder.zig`, `encoding.zig`, `root.zig`), the harness cores, `build.zig`,
 the justfile, the flake, CI, and this file.
 
-- **Japanese** (branch `wave1-japanese`): Shift_JIS, EUC-JP, and
-  ISO-2022-JP; `src/japanese.zig` or one file per encoding, the
-  `src/tables/` files for jis0208, jis0212, and iso-2022-jp-katakana, its
-  layouts, and its results files.
+- **Japanese** (landed at `96e0808`; japanese-20261102.md,
+  japanese-tables-20261102.md): Shift_JIS, EUC-JP, and ISO-2022-JP, on the
+  `japanese_paged` layout. 2.98x encoding_rs geomean over its rows; decode
+  0.93x at 16 bytes and 2.3x at 1 MiB; encode 5-7x, because encoding_rs's
+  default build encodes kanji by linear scan. Tables 50,005 bytes against
+  encoding_rs's 26,262 (68,056 with its fast kanji encode).
 - **Chinese** (branch `wave1-chinese`): GBK, gb18030, and Big5;
   `src/gb18030.zig`, `src/big5.zig`, the `src/tables/` files for gb18030,
   its four-byte ranges, and big5, its layouts, and its results files.
@@ -189,9 +191,20 @@ the justfile, the flake, CI, and this file.
    deltas instead of flat arrays) and pays a little lookup speed for it.
    Measure flat, ranged, and two-level layouts on decode and encode speed and
    on `.rodata` size before settling.
+   Japanese measured (japanese-tables-20261102.md): `japanese_paged`, pages
+   of 32 to 128 entries behind a page index with empty pages shared,
+   decodes at 0.95 ns a lookup against 0.80 for flat, and jis0208 is 29%
+   smaller; ranged is 2x slower to decode for little saving. The verdict
+   waits for the Chinese measurements. Whatever the layout, never merge
+   two branches into an optional or a struct holding a `u21`: LLVM routes
+   it through memory, a store-forwarding stall per character. Return early,
+   or use `u32`.
 2. **Encoder lookups.** Encoding to a CJK encoding needs a reverse map from
    code point to bytes: a search over the decode table, a generated
    perfect hash, or a ranged reverse table. Same two-sided measurement.
+   Japanese measured: a 64-code-point bitmap per block with a popcount
+   rank into packed pointers, 1.38 ns a lookup against 41 for bisection
+   and 6 for a perfect hash, and 31% smaller than the flat encode table.
 3. **Sharing with utf.** Settled in wave 0: depend on utf's module, pinned
    by commit (`9b4dcff`, untagged). Its public `validate`, `convert`, and
    `length` cover the UTF-8 and UTF-16 codecs, and its runtime x86-64
