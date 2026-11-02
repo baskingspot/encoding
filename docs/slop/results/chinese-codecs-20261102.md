@@ -26,7 +26,8 @@ to UTF-8 +52%, to UTF-16 +64%, encode from UTF-8 +36%, from UTF-16 +7.5%);
 424 rows faster, 25 slower, 79 within noise. These numbers are on the
 committed `flat` tables, whose `decode` has the same kind of stall (its
 `?u21`; see `chinese-layouts-20261102.md`), so decode is still 0.66–0.86x
-encoding_rs here. The layout study measures it on the other tables.
+encoding_rs here; on the tables of the layout study, which return early,
+it is 1.07–1.46x.
 
 ## Method
 
