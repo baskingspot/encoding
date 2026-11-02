@@ -224,7 +224,7 @@ pub const Encoder = struct {
                 o += 1;
                 continue;
             }
-            const s = codec.read(Unit, src, i);
+            const s = codec.read(Unit, src, i, 3);
             const cp: u21 = @intCast(s.cp);
             if (index.encode(cp)) |pointer| {
                 if (dst.len - o < 2) return .{ .status = .output_full, .read = i, .written = o };

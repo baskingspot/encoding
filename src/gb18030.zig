@@ -346,7 +346,7 @@ pub const Encoder = struct {
                 o += 1;
                 continue;
             }
-            const s = codec.read(Unit, src, i);
+            const s = codec.read(Unit, src, i, 3);
             // A code point in index gb18030, the common case: none of the
             // standard's earlier steps applies to one, except GBK's U+20AC.
             if (!(e.gbk and s.cp == 0x20AC)) {

@@ -157,7 +157,7 @@ pub const Encoder = struct {
     }
 
     /// The byte for `cp`, a non-ASCII scalar value, or null.
-    inline fn lookup(e: *const Encoder, cp: u21) ?u8 {
+    inline fn lookup(e: *const Encoder, cp: u32) ?u8 {
         const off = cp -% e.run.cp;
         if (off < e.run.len) return @intCast(e.run.byte + off);
         if (cp > 0xFFFF) return null;
@@ -196,7 +196,7 @@ pub const Encoder = struct {
                     o += 1;
                     continue;
                 }
-                const s = codec.readScalar(Unit, src, i);
+                const s = codec.read(Unit, src, i, 2);
                 if (e.lookup(s.cp)) |b| {
                     if (o == dst.len) return .{ .status = .output_full, .read = i, .written = o };
                     dst[o] = b;
@@ -206,9 +206,10 @@ pub const Encoder = struct {
                         .status = .unmappable,
                         .read = i + s.len,
                         .written = o,
-                        .unmappable = s.cp,
+                        .unmappable = @intCast(s.cp),
                     };
-                    o += codec.putNcr(dst, o, s.cp) orelse return .{ .status = .output_full, .read = i, .written = o };
+                    o += codec.putNcr(dst, o, @intCast(s.cp)) orelse
+                        return .{ .status = .output_full, .read = i, .written = o };
                 }
                 i += s.len;
             }

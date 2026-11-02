@@ -589,7 +589,7 @@ pub const Encoder = struct {
                 // Characters index jis0208 has, other than those the
                 // handler changes first.
                 while (i < src.len and dst.len - o >= 2) {
-                    const s = codec.read(Unit, src, i);
+                    const s = codec.read(Unit, src, i, 3);
                     if (s.cp < 0x80 or s.cp == 0xA5 or s.cp == 0x203E or s.cp == 0x2212 or
                         (s.cp >= 0xFF61 and s.cp <= 0xFF9F)) break;
                     const p = jis0208.encode(@intCast(s.cp)) orelse break;
@@ -600,7 +600,7 @@ pub const Encoder = struct {
                 }
                 if (i == src.len) break;
             }
-            const s = codec.read(Unit, src, i);
+            const s = codec.read(Unit, src, i, 3);
             // The standard's handler; an escape restores the code point to
             // the queue, so it runs again in the new state.
             const unmappable: u21 = while (true) {
@@ -714,7 +714,7 @@ fn encodeTwoByte(
                 }
                 continue;
             }
-            const s = codec.read(Unit, src, i);
+            const s = codec.read(Unit, src, i, 3);
             const bytes = map(@intCast(s.cp));
             if (bytes.len == 0) break;
             dst[o] = bytes.b[0];
@@ -724,7 +724,7 @@ fn encodeTwoByte(
         }
         if (i == src.len) return .{ .status = .input_empty, .read = i, .written = o };
         // Then one character with room checks, or an error.
-        const s = codec.read(Unit, src, i);
+        const s = codec.read(Unit, src, i, 3);
         const bytes = map(@intCast(s.cp));
         if (bytes.len != 0) {
             if (dst.len - o < bytes.len) return .{ .status = .output_full, .read = i, .written = o };

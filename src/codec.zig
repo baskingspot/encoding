@@ -360,16 +360,26 @@ pub inline fn asciiRunOut(comptime Unit: type, src: []const Unit, dst: []u8) usi
 pub const Read = struct { cp: u32, len: u32 };
 
 /// The scalar value at `src[i]`, `src[i] >= 0x80`, as `readScalar` reads
-/// it, with the three-byte UTF-8 sequences of most non-Latin text inline.
-pub inline fn read(comptime Unit: type, src: []const Unit, i: usize) Read {
+/// it, with well-formed two- and three-byte UTF-8 sequences inline.
+/// `first` is the length the caller sees most, whose check comes first:
+/// 2 for the Latin, Greek, Cyrillic, Hebrew, and Arabic text of the
+/// single-byte encodings, 3 for CJK. Each check costs the other's
+/// characters a compare and a branch, which on short characters shows.
+pub inline fn read(comptime Unit: type, src: []const Unit, i: usize, comptime first: u2) Read {
     if (Unit == u8) {
         const c = src[i];
-        // E0 and ED need narrower second bytes; the others take any.
-        if (c >= 0xE1 and c <= 0xEF and c != 0xED and src.len - i >= 3) {
-            const c1 = src[i + 1];
-            const c2 = src[i + 2];
-            if (c1 & 0xC0 == 0x80 and c2 & 0xC0 == 0x80) {
-                return .{ .cp = @as(u32, c & 0xF) << 12 | @as(u32, c1 & 0x3F) << 6 | (c2 & 0x3F), .len = 3 };
+        inline for (if (first == 2) .{ 2, 3 } else .{ 3, 2 }) |n| {
+            if (n == 2 and c >= 0xC2 and c <= 0xDF and src.len - i >= 2) {
+                const c1 = src[i + 1];
+                if (c1 & 0xC0 == 0x80) return .{ .cp = @as(u32, c & 0x1F) << 6 | (c1 & 0x3F), .len = 2 };
+            }
+            // E0 and ED need narrower second bytes; the others take any.
+            if (n == 3 and c >= 0xE1 and c <= 0xEF and c != 0xED and src.len - i >= 3) {
+                const c1 = src[i + 1];
+                const c2 = src[i + 2];
+                if (c1 & 0xC0 == 0x80 and c2 & 0xC0 == 0x80) {
+                    return .{ .cp = @as(u32, c & 0xF) << 12 | @as(u32, c1 & 0x3F) << 6 | (c2 & 0x3F), .len = 3 };
+                }
             }
         }
     } else {
@@ -395,6 +405,23 @@ test "put and unitsOf agree with std.unicode" {
         try std.testing.expectEqual(cp, readScalar(u16, w[0..k], 0).cp);
         try std.testing.expectEqual(cp, readScalar(u8, buf[0..n], 0).cp);
     }
+}
+
+test "read agrees with readScalar on every two- and three-byte prefix" {
+    var buf: [3]u8 = undefined;
+    for (0x80..0x100) |a| for (0..0x100) |b| for (0..0x100) |c| {
+        if (c != 0 and (a < 0xE0 or a > 0xEF)) break;
+        buf = .{ @intCast(a), @intCast(b), @intCast(c) };
+        // With the third byte and without it, so a cut sequence is seen.
+        for ([_][]const u8{ buf[0..3], buf[0..2] }) |s| {
+            const want = readScalar(u8, s, 0);
+            inline for (.{ 2, 3 }) |first| {
+                const got = read(u8, s, 0, first);
+                try std.testing.expectEqual(@as(u32, want.cp), got.cp);
+                try std.testing.expectEqual(want.len, got.len);
+            }
+        }
+    };
 }
 
 test "putNcr writes the shortest decimal" {
