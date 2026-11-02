@@ -28,6 +28,10 @@ const impls = .{
     .flat = @import("layouts/flat.zig"), // ziglint-ignore: Z028
 
     // Wave 1, Japanese: its layouts.
+    .japanese_rows = @import("layouts/japanese_rows.zig"), // ziglint-ignore: Z028
+    .japanese_paged = @import("layouts/japanese_paged.zig"), // ziglint-ignore: Z028
+    .japanese_ranged = @import("layouts/japanese_ranged.zig"), // ziglint-ignore: Z028
+    .japanese_hash = @import("layouts/japanese_hash.zig"), // ziglint-ignore: Z028
 
     // Wave 1, Chinese: its layouts.
 };
