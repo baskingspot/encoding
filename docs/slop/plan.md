@@ -55,6 +55,18 @@ every buffer.
   `decodeToUtf16(src, dst, last)` return how much they read and wrote and
   whether they stopped for output space, input, or (in fatal mode) an error
   and its position. Encoders mirror them from UTF-8 and UTF-16.
+- `DecoderFor(encodings)` and `EncoderFor(encodings)`: `Decoder` and
+  `Encoder` specialized at compile time to a set of encodings, so a program
+  links only those families' code and tables (docs/slop/comptime.md).
+  `Decoder` is `DecoderFor(&implemented)` and `Encoder` is
+  `EncoderFor(&implemented)`, with the same calls, results, and streaming
+  contract. Any order and repeats give the same type. An empty or
+  unimplemented set is a compile error, and an encoding outside the set
+  panics in `init`. A set that holds `bom_encodings` takes
+  `Decoder.Options`; any other takes `OptionsWithoutSniff`, whose `bom` is
+  `.remove` or `.keep` with no default. A family that tells its encodings
+  apart at run time may declare `decodeAs` and `encodeAs`, with the encoding
+  a compile-time parameter.
 - `maxUtf8Len(n)`, `maxUtf16Len(n)`, and the encoders' `maxLenFromUtf8(n)`
   and `maxLenFromUtf16(n)` say how big an output buffer a call needs, so a
   caller can size it once.
@@ -197,17 +209,15 @@ file.
   `codec.zig`. IBM437 and IBM850 are single-byte tables. test-layouts keeps
   flat, japanese_paged, and chinese_rank. Tables are 333,075 bytes against
   encoding_rs's 124,497.
-- **Compile-time decoders** (branch `wave1-comptime`): a decoder and
-  encoder specialized at compile time to one encoding, so a program that
-  uses one links only that encoding's code and tables
-  (link-size-20261102.md). New files only: `docs/slop/comptime.md`, its
-  prototype under `src/` in files it creates, its tests and bench rows in
-  files it creates, and its results files. Changes to `Decoder.zig`,
-  `Encoder.zig`, `root.zig`, or the harnesses come as requests in its
-  report, after the core orb lands.
+- **Compile-time decoders** (landed; comptime-20261102.md, comptime.md):
+  `DecoderFor`/`EncoderFor`, now the base of `Decoder` and `Encoder`. A
+  windows-1252 decoder links 320 bytes of .rodata and 812 of .text in
+  ReleaseSmall, against 178,212 and 34,047 for `Decoder`. One encoding is
+  0.876x `Decoder`'s time per call at 16 bytes and the same at 64 KiB;
+  `DecoderFor(&implemented)` is 1.004x and links what `Decoder` links.
 
 Wave 2, SIMD, two orbs in parallel beside the compile-time decoder orb.
-Neither edits `Decoder.zig` or `Encoder.zig`. The orchestrating thread owns
+Neither edits `coder.zig` or `codecs.zig`. The orchestrating thread owns
 everything not listed.
 
 - **Single-byte and UTF-16** (branch `wave2-single-byte`): `src/codec.zig`

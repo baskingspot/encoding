@@ -292,20 +292,17 @@ Two lessons came out of the measurement. Both are in the results:
    test of the public types. The fuzzer gets a specialized target.
 4. Japanese adds `decodeAs` and `encodeAs`.
 
-## Decisions for the owner
+## Decisions (the owner's, 2026-11-02)
 
-1. **A type parameter, not the inline-`init` trick.** The trick needs no
-   new API and is fast per call, but its savings depend on how callers
-   write `init`, and it adds 19 KB of .text to programs that pick the
-   encoding at run time.
-2. **The names.** `DecoderFor` and `EncoderFor` take a slice. The
-   alternatives are a `std.EnumSet(Encoding)` parameter, or a different
-   `init` for a set of one that does not take the encoding.
-3. **Byte order marks.** Should sets without the UTF encodings get
-   `OptionsWithoutSniff`, with no `.sniff` and no default? Or should
-   `DecoderFor` add `bom_encodings` itself, for 16 KB more?
-4. **Named sets.** Export `no_cjk` or not, and whether to add any other
-   set.
-5. **`decodeAs` and `encodeAs`.** Make them part of the family contract
-   in `adding-an-encoding.md` as optional declarations, and ask Japanese
-   to add them.
+Landed as `src/coder.zig`, with `Decoder.zig`, `Encoder.zig`, and
+`inline_init.zig` deleted; the sections above describe the prototype as
+measured.
+
+1. **A type parameter**, not the inline-`init` trick.
+2. **The names stay:** `DecoderFor` and `EncoderFor`, taking a slice.
+3. **`OptionsWithoutSniff`** for sets without `bom_encodings`: no
+   `.sniff` and no default, a compile error rather than 16 KB.
+4. **No named sets exported.** `no_cjk` stays internal, for the tests and
+   the size programs.
+5. **`decodeAs` and `encodeAs`** are an optional part of the family
+   contract (`adding-an-encoding.md`); Japanese adds them in wave 2.

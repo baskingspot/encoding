@@ -47,6 +47,13 @@ moment it does.
   };
   ```
 
+  A family that implements several encodings and tells them apart at run
+  time may also declare `decodeAs` and `encodeAs`: `decode` and `encode`
+  with the encoding a `comptime` parameter, so that a `DecoderFor` or
+  `EncoderFor` over one of its encodings links only that encoding's code
+  and tables (`src/coder.zig`, docs/slop/comptime.md). Its `decode` then
+  switches on its state with `inline else` into `decodeAs`.
+
   `Unit` is `u8` (UTF-8) or `u16` (UTF-16 in the machine's byte order).
   `src/codec.zig` has the shared pieces: the result types; `tryPut` and
   `putNcr` for output; `read` for encoder input, a plain `u32` code point
