@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const utf = @import("utf");
 
 pub const Encoding = @import("encoding.zig").Encoding;
 
@@ -351,6 +352,133 @@ pub inline fn asciiRunOut(comptime Unit: type, src: []const Unit, dst: []u8) usi
         k += ascii_block;
     }
     return k;
+}
+
+/// Copies whole blocks of ASCII bytes from the start of `src` to `dst`,
+/// widened for UTF-16, while both have a block left, and returns how many
+/// it copied: 0 when the first block holds a byte from 0x80. After one
+/// block, more ASCII likely follows, so it goes on two blocks at a time.
+pub inline fn asciiBlocks(comptime Unit: type, src: []const u8, dst: []Unit) usize {
+    const V = @Vector(ascii_block, u8);
+    const v: V = src[0..ascii_block].*;
+    if (@reduce(.Or, v >= @as(V, @splat(0x80)))) return 0;
+    dst[0..ascii_block].* = if (Unit == u8) v else @as(@Vector(ascii_block, u16), v);
+    var k: usize = ascii_block;
+    const P = @Vector(2 * ascii_block, u8);
+    while (src.len - k >= 2 * ascii_block and dst.len - k >= 2 * ascii_block) : (k += 2 * ascii_block) {
+        const p: P = src[k..][0 .. 2 * ascii_block].*;
+        if (@reduce(.Or, p >= @as(P, @splat(0x80)))) break;
+        dst[k..][0 .. 2 * ascii_block].* = if (Unit == u8) p else @as(@Vector(2 * ascii_block, u16), p);
+    }
+    return k;
+}
+
+/// `asciiBlocks` from UTF-8 or UTF-16 to bytes, narrowed.
+pub inline fn asciiBlocksOut(comptime Unit: type, src: []const Unit, dst: []u8) usize {
+    const V = @Vector(ascii_block, Unit);
+    const v: V = src[0..ascii_block].*;
+    if (@reduce(.Or, v >= @as(V, @splat(0x80)))) return 0;
+    dst[0..ascii_block].* = if (Unit == u8) v else @as(@Vector(ascii_block, u8), @truncate(v));
+    var k: usize = ascii_block;
+    const P = @Vector(2 * ascii_block, Unit);
+    while (src.len - k >= 2 * ascii_block and dst.len - k >= 2 * ascii_block) : (k += 2 * ascii_block) {
+        const p: P = src[k..][0 .. 2 * ascii_block].*;
+        if (@reduce(.Or, p >= @as(P, @splat(0x80)))) break;
+        dst[k..][0 .. 2 * ascii_block].* = if (Unit == u8) p else @as(@Vector(2 * ascii_block, u8), @truncate(p));
+    }
+    return k;
+}
+
+/// The UTF-16 units a decoder that has no SIMD UTF-8 path of its own
+/// (single_byte.zig, x_user_defined.zig) stages at a time: it decodes up
+/// to this many to UTF-16 a block at a time, then `bmpToUtf8` transcodes
+/// them with utf's SIMD.
+pub const stage_len = 256;
+
+/// What `bmpToUtf8` did: the units it read and the bytes it wrote.
+pub const Converted = struct { read: usize, written: usize };
+
+const native_to_utf8 = if (native_endian == .little) utf.convert.utf16leToUtf8 else utf.convert.utf16beToUtf8;
+
+/// utf's checked UTF-8 to UTF-16 in the machine's byte order: an encoder
+/// that has no SIMD UTF-8 path of its own stages its input with it.
+pub const utf8_to_native = if (native_endian == .little) utf.convert.utf8ToUtf16le else utf.convert.utf8ToUtf16be;
+
+/// Transcodes `src`, UTF-16 in the machine's byte order with no surrogates,
+/// to UTF-8 at the start of `dst`, as many characters as fit whole.
+pub fn bmpToUtf8(src: []const u16, dst: []u8) Converted {
+    const r = native_to_utf8(src, dst);
+    return .{ .read = if (r.err == .none) src.len else r.count, .written = r.written };
+}
+
+/// Whether `s`, UTF-8, holds three or more characters from U+0080, or
+/// two from U+0800: more than `encodeStaged` costs to start. Sparser
+/// text, as Latin with the odd accented letter, goes faster a character
+/// at a time between ASCII runs.
+pub inline fn denseUtf8(s: *const [ascii_block]u8) bool {
+    const v: @Vector(ascii_block, u8) = s.*;
+    return @popCount(highBits(v >= @as(@Vector(ascii_block, u8), @splat(0x80)))) >= 6;
+}
+
+/// Encodes UTF-8 from the start of `src` into `dst` through UTF-16, for
+/// an encoder whose characters are one byte each and that has no SIMD
+/// UTF-8 path of its own: utf transcodes up to `stage_len` bytes, and
+/// `coder` encodes the units, `coder.encodeBlock(s, d)` a block at a time
+/// (the lane of the first unit it cannot map, or `ascii_block`) and
+/// `coder.byteOf(u)` one non-ASCII unit at a time (0 for none). In html
+/// mode a character the encoding lacks becomes a numeric character
+/// reference here too, so that a run of them does not go back through
+/// utf one at a time. Stops at the first such character in fatal mode, at
+/// ill-formed UTF-8 (which utf ends the units at), and when `dst` is full;
+/// returns the bytes read and written.
+pub noinline fn encodeStaged(coder: anytype, src: []const u8, dst: []u8, mode: EncoderMode) Converted {
+    const W = @Vector(ascii_block, u16);
+    var stage: [stage_len]u16 = undefined;
+    const units = utf8_to_native(src[0..@min(src.len, stage.len)], &stage).written;
+    var k: usize = 0;
+    var r: usize = 0;
+    var w: usize = 0;
+    while (k < units) {
+        if (units - k >= ascii_block and dst.len - w >= ascii_block) {
+            const a = asciiBlocksOut(u16, stage[k..units], dst[w..]);
+            if (a != 0) {
+                k += a;
+                r += a;
+                w += a;
+                continue;
+            }
+            const u: W = stage[k..][0..ascii_block].*;
+            const n = coder.encodeBlock(stage[k..][0..ascii_block], dst[w..][0..ascii_block]);
+            // A unit from U+0080 took two bytes of UTF-8, from U+0800 three.
+            const done: u16 = if (n == ascii_block) 0xFFFF else (@as(u16, 1) << @intCast(n)) - 1;
+            r += n + @as(usize, @popCount(highBits(u >= @as(W, @splat(0x80))) & done)) +
+                @popCount(highBits(u >= @as(W, @splat(0x800))) & done);
+            k += n;
+            w += n;
+            if (n == ascii_block) continue;
+        } else {
+            const u = stage[k];
+            const b: u8 = if (u < 0x80) @intCast(u) else coder.byteOf(u);
+            if (b != 0 or u == 0) {
+                if (w == dst.len) break;
+                dst[w] = b;
+                w += 1;
+                k += 1;
+                r += unitsOf(u8, u);
+                continue;
+            }
+        }
+        // `stage[k]` is a character the encoding lacks: a code point in
+        // the BMP, or a pair of surrogates, which utf writes only whole.
+        if (mode == .fatal) break;
+        const u = stage[k];
+        const pair = u >= 0xD800 and u <= 0xDBFF;
+        const cp: u21 = if (pair) 0x10000 + ((@as(u21, u) - 0xD800) << 10) + (stage[k + 1] - 0xDC00) else u;
+        w += putNcr(dst, w, cp) orelse break;
+        k += if (pair) 2 else 1;
+        r += unitsOf(u8, cp);
+    }
+    return .{ .read = r, .written = w };
 }
 
 /// A scalar value an encoder read, and the units it took, as plain
