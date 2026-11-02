@@ -39,9 +39,9 @@ test "decode: every pointer" {
     defer gpa.free(list);
     var end: u32 = 0;
     for (list) |e| end = @max(end, e.pointer + 1);
-    const want = try gpa.alloc(?u21, end + 1000);
+    const want = try gpa.alloc(u32, end + 1000);
     defer gpa.free(want);
-    @memset(want, null);
+    @memset(want, 0);
     for (list) |e| want[e.pointer] = e.cp;
     for (want, 0..) |w, p| try std.testing.expectEqual(w, table.decode(@intCast(p)));
 }

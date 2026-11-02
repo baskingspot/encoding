@@ -78,7 +78,8 @@ inline fn sjisStep(s: []const u8) Step {
         const p = (b - lead_offset) * 188 + t - offset;
         // EUDC: Windows' private use mapping.
         if (p >= 8836 and p <= 10715) return .{ .cp = @intCast(0xE000 - 8836 + p), .len = 2 };
-        if (jis0208.decode(p)) |cp| return .{ .cp = cp, .len = 2 };
+        const cp = jis0208.decode(p);
+        if (cp != 0) return .{ .cp = @intCast(cp), .len = 2 };
     }
     return errStep(t, 2);
 }
@@ -99,11 +100,13 @@ inline fn eucStep(s: []const u8) Step {
         if (s.len < 3) return .{ .cp = err, .len = 0 };
         const u = s[2];
         if (u >= 0xA1 and u <= 0xFE) {
-            if (jis0212.decode((@as(u32, t) - 0xA1) * 94 + u - 0xA1)) |cp| return .{ .cp = cp, .len = 3 };
+            const cp = jis0212.decode((@as(u32, t) - 0xA1) * 94 + u - 0xA1);
+            if (cp != 0) return .{ .cp = @intCast(cp), .len = 3 };
         }
         return errStep(u, 3);
     }
-    if (jis0208.decode((@as(u32, b) - 0xA1) * 94 + t - 0xA1)) |cp| return .{ .cp = cp, .len = 2 };
+    const cp = jis0208.decode((@as(u32, b) - 0xA1) * 94 + t - 0xA1);
+    if (cp != 0) return .{ .cp = @intCast(cp), .len = 2 };
     return .{ .cp = err, .len = 2 };
 }
 
@@ -116,16 +119,14 @@ inline fn sjisPair(b: u8, t: u8) u21 {
     if (t < 0x40 or t == 0x7F or t > 0xFC) return 0;
     const offset: u32 = if (t < 0x7F) 0x40 else 0x41;
     const lead_offset: u32 = if (b < 0xA0) 0x81 else 0xC1;
-    if (jis0208.decode((b - lead_offset) * 188 + t - offset)) |cp| return cp;
-    return 0;
+    return @intCast(jis0208.decode((b - lead_offset) * 188 + t - offset));
 }
 
 /// EUC-JP's common case: the code point of `b` and `t`, both from 0xA1,
 /// in index jis0208, or 0 for anything else, which `eucStep` decodes.
 inline fn eucPair(b: u8, t: u8) u21 {
     if (b < 0xA1 or b == 0xFF or t < 0xA1 or t == 0xFF) return 0;
-    if (jis0208.decode((@as(u32, b) - 0xA1) * 94 + t - 0xA1)) |cp| return cp;
-    return 0;
+    return @intCast(jis0208.decode((@as(u32, b) - 0xA1) * 94 + t - 0xA1));
 }
 
 /// ISO-2022-JP's decoder states, as the standard names them.
@@ -196,7 +197,8 @@ fn isoStep(iso: Iso, byte: ?u8) IsoOut {
             st.state = .lead_byte;
             if (b >= 0x21 and b <= 0x7E) {
                 const p = (@as(u32, st.leading) - 0x21) * 94 + b - 0x21;
-                if (jis0208.decode(p)) |cp| return .{ .iso = st, .kind = .char, .cp = cp };
+                const cp = jis0208.decode(p);
+                if (cp != 0) return .{ .iso = st, .kind = .char, .cp = @intCast(cp) };
             }
             return .{ .iso = st, .kind = .err };
         },
@@ -407,8 +409,9 @@ pub const Decoder = struct {
                             const a = src[i];
                             const b = src[i + 1];
                             if (a < 0x21 or a > 0x7E or b < 0x21 or b > 0x7E) break;
-                            const cp = jis0208.decode((@as(u32, a) - 0x21) * 94 + b - 0x21) orelse break;
-                            o += codec.tryPut(Unit, dst, o, cp) orelse break;
+                            const cp = jis0208.decode((@as(u32, a) - 0x21) * 94 + b - 0x21);
+                            if (cp == 0) break;
+                            o += codec.tryPut(Unit, dst, o, @intCast(cp)) orelse break;
                             i += 2;
                         }
                         if (i != start) d.iso.output = false;
@@ -630,7 +633,7 @@ pub const Encoder = struct {
                 } else {
                     var c = cp;
                     if (c == 0x2212) c = 0xFF0D;
-                    if (c >= 0xFF61 and c <= 0xFF9F) c = katakana.decode(c - 0xFF61).?;
+                    if (c >= 0xFF61 and c <= 0xFF9F) c = @intCast(katakana.decode(c - 0xFF61));
                     if (jis0208.encode(c)) |p| {
                         if (e.state == .jis0208) {
                             if (dst.len - o < 2) return .{ .status = .output_full, .read = i, .written = o };
@@ -978,7 +981,8 @@ test "every code point encodes to the standard's index pointer" {
     var p: u32 = 12000;
     while (p > 0) {
         p -= 1;
-        const cp = jis0208.decode(p) orelse continue;
+        const cp = jis0208.decode(p);
+        if (cp == 0) continue;
         first[cp] = @intCast(p);
         if (p < 8272 or p > 8835) sjis[cp] = @intCast(p);
     }

@@ -76,14 +76,10 @@ fn emitDecode(w: *std.Io.Writer, gpa: std.mem.Allocator, entries: []const index.
     try w.writeAll(
         \\};
         \\
-        \\pub fn decode(pointer: u32) ?u21 {
-        \\    if (pointer >> shift >= page_of.len) return null;
+        \\pub fn decode(pointer: u32) u32 {
+        \\    if (pointer >> shift >= page_of.len) return 0;
         \\    const page: u32 = page_of[pointer >> shift];
-        \\    const cp = cells[page << shift | (pointer & ((1 << shift) - 1))];
-        \\    // An early return: `if (cp == 0) null else cp` costs callers a
-        \\    // trip through memory for the optional.
-        \\    if (cp == 0) return null;
-        \\    return @intCast(cp);
+        \\    return cells[page << shift | (pointer & ((1 << shift) - 1))];
         \\}
         \\
         \\

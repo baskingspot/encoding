@@ -48,9 +48,15 @@ moment it does.
   ```
 
   `Unit` is `u8` (UTF-8) or `u16` (UTF-16 in the machine's byte order).
-  `src/codec.zig` has the shared pieces: the result types, `tryPut` and
-  `putNcr` for output, `readScalar` for encoder input (ill-formed input
-  reads as U+FFFD), and `asciiPrefixBlocks` for ASCII runs.
+  `src/codec.zig` has the shared pieces: the result types; `tryPut` and
+  `putNcr` for output; `read` for encoder input, a plain `u32` code point
+  and length (ill-formed input reads as U+FFFD; `first` is 2 or 3, the
+  UTF-8 length tested first), and `readScalar`, its `Scalar` form for
+  cold paths; and `asciiRun`, `asciiRunOut`, `asciiPrefixBlocks`,
+  `copyAscii`, `narrowAscii`, and `highBits` (big-endian safe) for ASCII
+  runs. In a hot loop, never merge two paths into an optional or a struct
+  holding a `u21`: LLVM passes it through memory on every character.
+  Return early, or use a `u32` with 0 for none.
 
 - `src/tables/<index>.zig`: generated from `vendor/whatwg-encoding/` by
   `just gen`, never edited. Committed, so a consumer's build runs no
@@ -58,8 +64,8 @@ moment it does.
   generator writes.
 - `gen/layouts/<layout>.zig`: a table layout, if the family adds one for
   plan decisions 1 and 2. Every layout emits the same interface
-  (`decode(pointer) ?u21`, `encode(cp) ?u16`), so a codec never changes
-  when its table's layout does.
+  (`decode(pointer) u32`, 0 for none, and `encode(cp) ?u16`), so a codec
+  never changes when its table's layout does. Callers test `cp != 0`.
 - Unit tests inside the family file, for the standard's edge cases the
   shared harnesses cannot name: the decoder's error recovery (which bytes
   are re-read after an error), ISO-2022-JP's states, gb18030's four-byte

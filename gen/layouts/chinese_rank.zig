@@ -98,14 +98,13 @@ fn emitDecodeFlat(w: *Writer, gpa: Allocator, entries: []const index.Entry) !voi
         try writeArray(w, u32, "decode_astral", "u32", words);
     }
     try w.writeAll(
-        \\fn decodeIndex(pointer: u32) ?u21 {
-        \\    if (pointer >= decode_table.len) return null;
-        \\    const low: u21 = decode_table[pointer];
+        \\fn decodeIndex(pointer: u32) u32 {
+        \\    if (pointer >= decode_table.len) return 0;
+        \\    const low: u32 = decode_table[pointer];
         \\
     );
     try writeAstralReturn(w, s, "decode_astral", "pointer");
     try w.writeAll(
-        \\    if (low == 0) return null;
         \\    return low;
         \\}
         \\

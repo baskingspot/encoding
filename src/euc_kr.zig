@@ -18,10 +18,10 @@ const EncodeResult = codec.EncodeResult;
 
 pub const encodings = [_]Encoding{.euc_kr};
 
-/// The index code point of `lead`, from 0x81 to 0xFE, and `trail`, or
-/// null for an error.
-inline fn lookup(lead: u8, trail: u8) ?u21 {
-    if (trail < 0x41 or trail == 0xFF) return null;
+/// The index code point of `lead`, from 0x81 to 0xFE, and `trail`, or 0
+/// for an error.
+inline fn lookup(lead: u8, trail: u8) u32 {
+    if (trail < 0x41 or trail == 0xFF) return 0;
     return index.decode((@as(u32, lead) - 0x81) * 190 + (trail - 0x41));
 }
 
@@ -102,9 +102,7 @@ pub const Decoder = struct {
             if (b != 0x80 and b != 0xFF and src.len - i >= 2) {
                 const t = src[i + 1];
                 if (t >= 0x41 and t != 0xFF) {
-                    // Unwrapped to a u32 at once: a captured `?u21` goes
-                    // through a stack slot on every character.
-                    const cp: u32 = index.decode((@as(u32, b) - 0x81) * 190 + (t - 0x41)) orelse 0;
+                    const cp = index.decode((@as(u32, b) - 0x81) * 190 + (t - 0x41));
                     if (cp != 0) {
                         const n = putIndex(Unit, dst, o, cp);
                         if (n == 0) return .{ .status = .output_full, .read = i, .written = o };
@@ -171,8 +169,9 @@ pub const Decoder = struct {
     /// whether it was an error (and nothing was written, in fatal mode).
     /// Null when the output does not fit.
     inline fn put(comptime Unit: type, dst: []Unit, o: usize, lead: u8, trail: u8, mode: codec.DecoderMode) ?Put {
-        if (lookup(lead, trail)) |cp| {
-            const n = codec.tryPut(Unit, dst, o, cp) orelse return null;
+        const cp = lookup(lead, trail);
+        if (cp != 0) {
+            const n = codec.tryPut(Unit, dst, o, @intCast(cp)) orelse return null;
             return .{ .read = 2, .written = n, .err = false };
         }
         const read: usize = if (trail < 0x80) 1 else 2;
@@ -371,13 +370,13 @@ test "every two-byte sequence decodes to its index code point, and encodes back"
             var out: [4]u8 = undefined;
             const r = decodeAll(&bytes, .fatal, &out);
             const want = index.decode((lead - 0x81) * 190 + trail - 0x41);
-            if (want == null) {
+            if (want == 0) {
                 try testing.expectEqual(codec.DecodeStatus.malformed, r.status);
                 try testing.expectEqual(@as(usize, if (trail < 0x80) 1 else 2), r.read);
                 continue;
             }
             try testing.expectEqual(codec.DecodeStatus.input_empty, r.status);
-            try testing.expectEqual(want.?, codec.readScalar(u8, out[0..r.written], 0).cp);
+            try testing.expectEqual(want, codec.readScalar(u8, out[0..r.written], 0).cp);
             // Index EUC-KR has no code point twice.
             var back: [4]u8 = undefined;
             const w = encodeAll(out[0..r.written], .fatal, &back);

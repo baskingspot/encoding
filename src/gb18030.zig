@@ -86,7 +86,8 @@ inline fn step(s: []const u8, end: bool) Step {
     if ((b2 >= 0x40 and b2 <= 0x7E) or (b2 >= 0x80 and b2 <= 0xFE)) {
         const offset: u32 = if (b2 < 0x7F) 0x40 else 0x41;
         const pointer = (@as(u32, b) - 0x81) * 190 + (b2 - offset);
-        if (index.decode(pointer)) |cp| return .{ .cp = .{ .cp = cp, .len = 2 } };
+        const cp = index.decode(pointer);
+        if (cp != 0) return .{ .cp = .{ .cp = @intCast(cp), .len = 2 } };
     }
     // An ASCII byte is restored.
     return .{ .err = if (b2 < 0x80) 1 else 2 };
@@ -138,8 +139,9 @@ pub const Decoder = struct {
                 const b2 = src[i + 1];
                 if (b != 0x80 and b != 0xFF and b2 >= 0x40 and b2 != 0x7F and b2 != 0xFF) {
                     const offset: u32 = if (b2 < 0x7F) 0x40 else 0x41;
-                    if (index.decode((@as(u32, b) - 0x81) * 190 + (b2 - offset))) |cp| {
-                        o += codec.tryPut(Unit, dst, o, cp) orelse
+                    const cp = index.decode((@as(u32, b) - 0x81) * 190 + (b2 - offset));
+                    if (cp != 0) {
+                        o += codec.tryPut(Unit, dst, o, @intCast(cp)) orelse
                             return .{ .status = .output_full, .read = i, .written = o };
                         i += 2;
                         continue;

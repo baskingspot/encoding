@@ -24,12 +24,8 @@ const cells = [96]u16{
     0x30E6, 0x30E8, 0x30E9, 0x30EA, 0x30EB, 0x30EC, 0x30ED, 0x30EF, 0x30F3, 0x309B, 0x309C, 0x0000,
 };
 
-pub fn decode(pointer: u32) ?u21 {
-    if (pointer >> shift >= page_of.len) return null;
+pub fn decode(pointer: u32) u32 {
+    if (pointer >> shift >= page_of.len) return 0;
     const page: u32 = page_of[pointer >> shift];
-    const cp = cells[page << shift | (pointer & ((1 << shift) - 1))];
-    // An early return: `if (cp == 0) null else cp` costs callers a
-    // trip through memory for the optional.
-    if (cp == 0) return null;
-    return @intCast(cp);
+    return cells[page << shift | (pointer & ((1 << shift) - 1))];
 }

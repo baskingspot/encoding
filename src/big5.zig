@@ -31,7 +31,11 @@ inline fn lookup(lead: u8, trail: u8) ?Pair {
         1135 => return .{ .first = 0xCA, .second = 0x30C },
         1164 => return .{ .first = 0xEA, .second = 0x304 },
         1166 => return .{ .first = 0xEA, .second = 0x30C },
-        else => return .{ .first = index.decode(pointer) orelse return null },
+        else => {
+            const cp = index.decode(pointer);
+            if (cp == 0) return null;
+            return .{ .first = @intCast(cp) };
+        },
     }
 }
 
@@ -94,8 +98,9 @@ pub const Decoder = struct {
                 if ((t >= 0x40 and t <= 0x7E) or (t >= 0xA1 and t <= 0xFE)) {
                     const offset: u32 = if (t < 0x7F) 0x40 else 0x62;
                     // The four pointers with two code points have no index entry.
-                    if (index.decode((@as(u32, b) - 0x81) * 157 + (t - offset))) |cp| {
-                        o += codec.tryPut(Unit, dst, o, cp) orelse
+                    const cp = index.decode((@as(u32, b) - 0x81) * 157 + (t - offset));
+                    if (cp != 0) {
+                        o += codec.tryPut(Unit, dst, o, @intCast(cp)) orelse
                             return .{ .status = .output_full, .read = i, .written = o };
                         i += 2;
                         continue;
@@ -340,7 +345,7 @@ test "every two-byte sequence decodes, and what encodes goes back to the same co
                 const r = decodeAll(&bytes, .fatal, &out);
                 if (r.status == .malformed) {
                     const offset: u16 = if (trail < 0x7F) 0x40 else 0x62;
-                    try testing.expectEqual(@as(?u21, null), index.decode((lead - 0x81) * 157 + trail - offset));
+                    try testing.expectEqual(@as(u32, 0), index.decode((lead - 0x81) * 157 + trail - offset));
                     continue;
                 }
                 var back: [16]u8 = undefined;

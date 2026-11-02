@@ -2003,10 +2003,9 @@ const decode_table = [23940]u16{
     0xE4BA, 0xE4BB, 0xE4BC, 0xE4BD, 0xE4BE, 0xE4BF, 0xE4C0, 0xE4C1, 0xE4C2, 0xE4C3, 0xE4C4, 0xE4C5,
 };
 
-fn decodeIndex(pointer: u32) ?u21 {
-    if (pointer >= decode_table.len) return null;
-    const low: u21 = decode_table[pointer];
-    if (low == 0) return null;
+fn decodeIndex(pointer: u32) u32 {
+    if (pointer >= decode_table.len) return 0;
+    const low: u32 = decode_table[pointer];
     return low;
 }
 

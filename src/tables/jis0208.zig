@@ -716,14 +716,10 @@ const cells = [8064]u16{
     0x9ADC, 0x9B75, 0x9B72, 0x9B8F, 0x9BB1, 0x9BBB, 0x9C00, 0x9D70, 0x9D6B, 0xFA2D, 0x9E19, 0x9ED1,
 };
 
-pub fn decode(pointer: u32) ?u21 {
-    if (pointer >> shift >= page_of.len) return null;
+pub fn decode(pointer: u32) u32 {
+    if (pointer >> shift >= page_of.len) return 0;
     const page: u32 = page_of[pointer >> shift];
-    const cp = cells[page << shift | (pointer & ((1 << shift) - 1))];
-    // An early return: `if (cp == 0) null else cp` costs callers a
-    // trip through memory for the optional.
-    if (cp == 0) return null;
-    return @intCast(cp);
+    return cells[page << shift | (pointer & ((1 << shift) - 1))];
 }
 
 /// The block of each 64 code points, 0 for one with none.

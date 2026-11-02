@@ -1988,10 +1988,9 @@ const decode_table = [23750]u16{
     0x7FB2, 0x8A70,
 };
 
-fn decodeIndex(pointer: u32) ?u21 {
-    if (pointer >= decode_table.len) return null;
-    const low: u21 = decode_table[pointer];
-    if (low == 0) return null;
+fn decodeIndex(pointer: u32) u32 {
+    if (pointer >= decode_table.len) return 0;
+    const low: u32 = decode_table[pointer];
     return low;
 }
 

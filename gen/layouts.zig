@@ -3,10 +3,13 @@
 //! one-word change in gen/sources.zig and `just gen`, and no codec
 //! changes:
 //!
-//!     pub fn decode(pointer: u32) ?u21   // the index code point, or null
+//!     pub fn decode(pointer: u32) u32    // the index code point, or 0
 //!     pub fn encode(cp: u21) ?u16        // the index pointer, or null
 //!     pub const exclude: []const [2]u32  // the source's encode options,
 //!     pub const last: []const u21        // for the full-index check
+//!
+//! `decode` returns 0 for none rather than an optional, which a caller's
+//! loop would carry through memory on every character.
 //!
 //! Each layout is a file under gen/layouts/ with
 //!

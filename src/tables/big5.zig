@@ -1774,11 +1774,10 @@ const decode_astral = [619]u32{
     0x12,
 };
 
-fn decodeIndex(pointer: u32) ?u21 {
-    if (pointer >= decode_table.len) return null;
-    const low: u21 = decode_table[pointer];
+fn decodeIndex(pointer: u32) u32 {
+    if (pointer >= decode_table.len) return 0;
+    const low: u32 = decode_table[pointer];
     if (decode_astral[pointer >> 5] >> @intCast(pointer & 31) & 1 != 0) return 0x20000 | low;
-    if (low == 0) return null;
     return low;
 }
 
