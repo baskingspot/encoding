@@ -157,7 +157,8 @@ bench-compare ROUNDS="10" *FILTER: bench-corpus bench-build
     # where encoding_rs lacks the encoding. This package must match it; any
     # other arm's row that does not is left out, and counted.
     awk -F'\t' '!/^#/ { print }' "$out/check-rust.txt" | sort > "$out/ref.txt"
-    join -t $'\t' -v 2 "$out/ref.txt" <(grep -v '^#' "$out/check-zig.txt" | sort) >> "$out/ref.txt"
+    join -t $'\t' -v 2 "$out/ref.txt" <(grep -v '^#' "$out/check-zig.txt" | sort) > "$out/ref-zig.txt"
+    cat "$out/ref-zig.txt" >> "$out/ref.txt"
     sort -o "$out/ref.txt" "$out/ref.txt"
     join -t $'\t' "$out/ref.txt" <(grep -v '^#' "$out/check-zig.txt" | sort) | awk -F'\t' '$2 != $3' > "$out/check-diff-zig.txt"
     if [ -s "$out/check-diff-zig.txt" ]; then
