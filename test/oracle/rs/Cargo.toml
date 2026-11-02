@@ -1,0 +1,11 @@
+[package]
+name = "encoding-oracle"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+encoding_rs = "0.8"
+
+[profile.release]
+debug = false

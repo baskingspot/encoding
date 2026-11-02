@@ -1,0 +1,16 @@
+# Tests test/wpt/run.mjs cannot pass yet, and why. One per line:
+#   SKIP <glob>[?variant] -- reason          not run
+#   FAIL <glob> [:: <subtest substring>] -- reason   run, expected to fail
+# Globs are relative to vendor/wpt; * stays inside a directory, ** does not.
+
+SKIP encoding/json-document-utf8.html -- needs a server (resources/json-charset.py) and a JSON viewer's decoding
+SKIP encoding/idlharness.any.js -- WebIDL interface objects; the shim's classes are plain JavaScript
+SKIP encoding/streams/invalid-realm.window.js -- needs a second browsing context to detach
+SKIP encoding/streams/realms.window.js -- needs srcdoc iframes as separate realms and postMessage between them
+SKIP encoding/legacy-mb-japanese/iso-2022-jp/iso2022jp-encode-form-errors-stateful.html -- needs a data: URL document that runs script and posts a message to its parent
+
+# Encodings this version does not implement yet. Each failure names the
+# encoding; the wave that adds one deletes its line.
+FAIL encoding/** :: /(Shift_JIS|EUC-JP|ISO-2022-JP) is not implemented yet/ -- Japanese encodings: not implemented yet
+FAIL encoding/** :: /(GBK|gb18030|Big5) is not implemented yet/ -- Chinese encodings: not implemented yet
+FAIL encoding/** :: /EUC-KR is not implemented yet/ -- Korean encoding: not implemented yet

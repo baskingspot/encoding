@@ -1,0 +1,11 @@
+# The jobs baskingspot/gh-actions' ci.yml runs, one each, in the Nix dev
+# shell. `just ci` runs the same recipes in one go.
+jobs:
+  - recipe: test
+  - recipe: check
+  - recipe: test-layouts
+  - recipe: lint
+  - recipe: fuzz-ci
+  - recipe: oracle
+  - recipe: wpt
+  - recipe: test-big-endian

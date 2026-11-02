@@ -3,3 +3,8 @@
 .zig-cache/
 zig-out/
 zig-pkg/
+# Cargo builds of the encoding_rs oracle and the Rust benchmark arm.
+test/oracle/rs/target/
+bench/rust/target/
+# The fetched and generated benchmark corpus (`just bench-corpus`).
+bench/corpus-gen/

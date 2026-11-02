@@ -1,8 +1,38 @@
-//! Legacy text encodings in Zig with no C. Nothing exists yet;
-//! docs/slop/plan.md is the scope and the order of work.
+//! Legacy text encodings in Zig with no C: the WHATWG Encoding Standard's
+//! decoders and encoders, streaming and allocation-free.
+//!
+//!     const enc = encoding.Encoding.forLabel("latin1") orelse return error.UnknownLabel;
+//!     var decoder: encoding.Decoder = .init(enc, .{});
+//!     const r = decoder.decodeToUtf8(bytes, out, true);
+//!
+//! `Encoding` names an encoding and maps labels to it. `Decoder` turns its
+//! bytes into UTF-8 or UTF-16, and `Encoder` turns UTF-8 or UTF-16 into its
+//! bytes, both over buffers the caller owns, in as many calls as the input
+//! takes.
 
 const std = @import("std");
+const codec = @import("codec.zig");
+
+pub const Encoding = @import("encoding.zig").Encoding;
+pub const Decoder = @import("Decoder.zig");
+pub const Encoder = @import("Encoder.zig");
+pub const DecodeResult = codec.DecodeResult;
+pub const DecodeStatus = codec.DecodeStatus;
+pub const EncodeResult = codec.EncodeResult;
+pub const EncodeStatus = codec.EncodeStatus;
+
+/// The longest numeric character reference an encoder in html mode writes
+/// for one character, `&#1114111;`: an output buffer this long always
+/// takes at least one character.
+pub const max_ncr_len = codec.max_ncr_len;
+
+/// Every encoding this version implements, for tests and harnesses that
+/// cover each one.
+pub const implemented = @import("codecs.zig").implemented;
 
 test {
     std.testing.refAllDecls(@This());
+    _ = codec;
+    // The families' tests come in through `codecs.families`.
+    _ = @import("codecs.zig");
 }

@@ -39,6 +39,10 @@
             .hash = "testingx-0.2.0-ib95-5lNAwA8WZQH6Q6eDm2hgfC3ixFJuhkOrR8gcZAm",
             .lazy = true,
         },
+        .utf = .{
+            .url = "git+https://github.com/baskingspot/utf#9b4dcffe277b1bbfc08e1000b908390ba2687f2e",
+            .hash = "utf-0.0.0-2GlLtt34BgCz8Ungq9CrypyubCfYrLK_xGlbljJCxp0G",
+        },
     },
     // Specifies the set of files and directories that are included in this package.
     // Only files and directories listed here are included in the `hash` that
@@ -51,6 +55,8 @@
     .paths = .{
         "build.zig",
         "build.zig.zon",
+        // build.zig imports gen/sources.zig and gen/layouts.zig.
+        "gen",
         "src",
         "LICENSE",
         "README.md",
