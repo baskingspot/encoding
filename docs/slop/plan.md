@@ -45,23 +45,38 @@ Modeled on encoding_rs's, in Zig's terms. Nothing allocates: callers own
 every buffer.
 
 - `Encoding`: one value per encoding, with `forLabel(label) ?Encoding`,
-  `name()`, and `forBom(bytes)`.
+  `name()`, `outputEncoding()`, and `forBom(bytes)`. Every phase-1
+  encoding is a tag from wave 0 on, IBM437 and IBM850 without labels;
+  `isImplemented()` says whether this version has its codec, and
+  `Decoder.init` and `Encoder.init` panic on one it lacks. `isImplemented`
+  goes away when phase 1 is complete.
 - `Decoder` and `Encoder`: small structs holding the streaming state (a
   pending lead byte, ISO-2022-JP's mode). `decodeToUtf8(src, dst, last)` and
   `decodeToUtf16(src, dst, last)` return how much they read and wrote and
   whether they stopped for output space, input, or (in fatal mode) an error
   and its position. Encoders mirror them from UTF-8 and UTF-16.
-- `maxUtf8Len(n)`, `maxUtf16Len(n)`, and the encoders' `maxLen(n)` say how
-  big an output buffer a call needs, so a caller can size it once.
+- `maxUtf8Len(n)`, `maxUtf16Len(n)`, and the encoders' `maxLenFromUtf8(n)`
+  and `maxLenFromUtf16(n)` say how big an output buffer a call needs, so a
+  caller can size it once.
+- As built in wave 0: `Decoder.Options` has `mode` (`.replacement` or
+  `.fatal`) and `bom`: `.sniff` is the standard's decode (a byte order mark
+  picks UTF-8 or UTF-16 and is removed), `.remove` its "UTF-8 decode" and
+  TextDecoder's default (only the encoding's own mark is removed), `.keep`
+  "decode without BOM handling". A fatal error's `read` ends just past the
+  malformed sequence. `Encoder.Options` has `mode` (`.html`, numeric
+  character references, or `.fatal`); encoders read ill-formed UTF-8 or
+  UTF-16 as U+FFFD, as the standard's UTF-8 decoder and its "convert to a
+  scalar value" do. `docs/slop/adding-an-encoding.md` is the family
+  contract behind both.
 - One-call conveniences over a whole buffer into a caller's buffer, and a
   `std.Io.Reader`/`std.Io.Writer` adapter that transcodes a stream.
 - `detect`: a `Detector` fed chunks, then asked for its guess.
 
 ## Dependencies
 
-- `baskingspot/utf`: UTF-8 and UTF-16 validation and the ASCII and UTF-8
-  paths should be utf's, not a second copy. Whether to depend on utf's
-  module or share its `simd.zig` is decision 3.
+- `baskingspot/utf`: UTF-8 and UTF-16 validation, conversion, and length
+  are utf's, through its module, pinned by commit in `build.zig.zon` until
+  utf tags a release (decision 3).
 - `testingx` for tests.
 
 ## Testing
@@ -118,6 +133,29 @@ in its own files is fine until the merge. Orbs push signed branches rebased on
 brings the branch onto main without merge commits, pushes, and deletes the
 branch.
 
+### Wave 1 split (proposed by wave 0)
+
+Two orbs in parallel, each owning its family files and tables and adding
+one line per registry (`docs/slop/adding-an-encoding.md`):
+
+- **Japanese**: `src/japanese.zig` (or one file per encoding),
+  `src/tables/jis0208.zig`, `jis0212.zig`, `iso_2022_jp_katakana.zig`, its
+  layouts under `gen/layouts/`, and its results files. Registry lines in
+  the Japanese slots of `src/codecs.zig`, `gen/sources.zig`, and
+  `gen/layouts.zig`; its line in `test/wpt/expectations.txt`; a
+  `CHANGELOG.md` bullet.
+- **Chinese**: `src/gb18030.zig` (GBK and gb18030) and `src/big5.zig`,
+  `src/tables/gb18030.zig`, its four-byte ranges, and `big5.zig`, its
+  layouts, and its results files, with the same registry lines in the
+  Chinese slots.
+
+Both measure decisions 1 and 2 on their own indexes and write them up; the
+orchestrating thread records the verdict here once both report, so neither
+edits this file. Then **Korean** (`src/euc_kr.zig`, `src/tables/euc_kr.zig`,
+on the layout the first two settle) and **IBM 437/850** (two lines in
+`gen/sources.zig`, two tags in `single_byte.zig`'s `encodings`, and a check
+against `vendor/unicode/` in `test/tables.zig`) can run in parallel too.
+
 ### Owners
 
 Wave 0, running as one orb (branch `wave0-foundations`): every file in the
@@ -134,9 +172,19 @@ own files plus at most one line in each shared registry.
 2. **Encoder lookups.** Encoding to a CJK encoding needs a reverse map from
    code point to bytes: a search over the decode table, a generated
    perfect hash, or a ranged reverse table. Same two-sided measurement.
-3. **Sharing with utf.** Depend on utf's module for UTF-8/UTF-16 work and
-   its SIMD helpers, or vendor `simd.zig`. Depending is the default, if utf's
-   API and release cadence allow it.
+3. **Sharing with utf.** Settled in wave 0: depend on utf's module, pinned
+   by commit (`9b4dcff`, untagged). Its public `validate`, `convert`, and
+   `length` cover the UTF-8 and UTF-16 codecs, and its runtime x86-64
+   dispatch comes with them; `simd.zig` is not exported and is utf's
+   internals, so vendoring it would fork the dispatch and the kernels for
+   no gain, and the ASCII runs a legacy codec needs are a few lines of
+   `@Vector` code in `src/codec.zig`. Costs: on an error the UTF-8 and
+   UTF-16 decoders call `utf.length` to recount the output written so far,
+   because utf's checked conversions return the input offset only; and
+   utf does not build for 32-bit targets (fixed on utf branch
+   `encoding-32bit`, which is also why the WPT harness builds wasm64).
+   Asked of utf: merge that branch, return the output count with a checked
+   conversion's error, and tag a release to pin instead of a commit.
 4. **UTF-16 output.** Whether `decodeToUtf16` gets SIMD paths of its own or
    goes through UTF-8, judged by how often callers on Windows and JavaScript
    hosts would use it.
