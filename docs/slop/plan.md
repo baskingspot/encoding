@@ -158,10 +158,30 @@ against `vendor/unicode/` in `test/tables.zig`) can run in parallel too.
 
 ### Owners
 
-Wave 0, running as one orb (branch `wave0-foundations`): every file in the
-repository except this Owners section, which the orchestrating thread keeps.
-Wave 0 also proposes the wave 1 split, so that adding an encoding touches its
-own files plus at most one line in each shared registry.
+Wave 0 (landed at `66f644c`): `Encoding` and labels, the `Decoder` and
+`Encoder` interface, UTF-8, UTF-16, replacement, x-user-defined and the 28
+single-byte encodings, the vendored indexes and WPT tests, the table
+generator, and the fuzz, oracle, WPT, and benchmark harnesses.
+
+Wave 1, Japanese and Chinese, two orbs in parallel. Each owns the files
+`adding-an-encoding.md` assigns its family, adds one line in its family's
+slot of each shared registry and a CHANGELOG bullet, and writes its
+decision 1 and 2 measurements in `docs/slop/results/`. A layout either orb
+adds is named for its family (`gen/layouts/japanese_<layout>.zig`,
+`gen/layouts/chinese_<layout>.zig`) so the two never collide; the
+orchestrating thread records the verdict here when both land, and Korean
+consolidates on the winner. The orchestrating thread owns everything else,
+including the shared `src/` files (`codec.zig`, `Decoder.zig`,
+`Encoder.zig`, `encoding.zig`, `root.zig`), the harness cores, `build.zig`,
+the justfile, the flake, CI, and this file.
+
+- **Japanese** (branch `wave1-japanese`): Shift_JIS, EUC-JP, and
+  ISO-2022-JP; `src/japanese.zig` or one file per encoding, the
+  `src/tables/` files for jis0208, jis0212, and iso-2022-jp-katakana, its
+  layouts, and its results files.
+- **Chinese** (branch `wave1-chinese`): GBK, gb18030, and Big5;
+  `src/gb18030.zig`, `src/big5.zig`, the `src/tables/` files for gb18030,
+  its four-byte ranges, and big5, its layouts, and its results files.
 
 ## Decisions to measure
 
