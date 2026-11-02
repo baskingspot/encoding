@@ -426,16 +426,26 @@ pub const Decoder = struct {
                         // ASCII, short of the bytes that are errors or
                         // escapes.
                         const start = i;
-                        const n = @min(src.len - i, dst.len - o);
-                        const k = isoAsciiUnits(u8, src[i..][0..n]);
-                        codec.copyAscii(Unit, dst[o..][0..k], src[i..][0..k]);
-                        i += k;
-                        o += k;
-                        while (i < src.len and o < dst.len) : (i += 1) {
+                        while (true) {
+                            const n = @min(src.len - i, dst.len - o);
+                            const k = isoAsciiUnits(u8, src[i..][0..n]);
+                            codec.copyAscii(Unit, dst[o..][0..k], src[i..][0..k]);
+                            i += k;
+                            o += k;
+                            while (i < src.len and o < dst.len) : (i += 1) {
+                                const b = src[i];
+                                if (b >= 0x80 or b == 0x0E or b == 0x0F or b == 0x1B) break;
+                                dst[o] = b;
+                                o += 1;
+                            }
+                            // A byte that is an error in this state, in
+                            // replacement mode: what the standard's step
+                            // does with it (U+FFFD, output unset), here.
+                            if (mode == .fatal or src.len - i == 0 or dst.len - o < 3 / @sizeOf(Unit)) break;
                             const b = src[i];
-                            if (b >= 0x80 or b == 0x0E or b == 0x0F or b == 0x1B) break;
-                            dst[o] = b;
-                            o += 1;
+                            if (b < 0x80 and b != 0x0E and b != 0x0F) break;
+                            o += codec.put(Unit, dst, o, codec.replacement_character);
+                            i += 1;
                         }
                         if (i != start) d.iso.output = false;
                     },
