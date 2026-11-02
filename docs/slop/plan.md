@@ -206,6 +206,23 @@ file.
   `Encoder.zig`, `root.zig`, or the harnesses come as requests in its
   report, after the core orb lands.
 
+Wave 2, SIMD, two orbs in parallel beside the compile-time decoder orb.
+Neither edits `Decoder.zig` or `Encoder.zig`. The orchestrating thread owns
+everything not listed.
+
+- **Single-byte and UTF-16** (branch `wave2-single-byte`): `src/codec.zig`
+  (the shared ASCII runs and readers), `src/single_byte.zig`,
+  `src/x_user_defined.zig`, `src/utf16.zig`, and its results files.
+  Loops whose speed does not depend on where the linker places them, the
+  single-byte UTF-16 non-ASCII encode path, x-user-defined's per-call cost,
+  and UTF-16LE's 16-byte decode.
+- **CJK** (branch `wave2-cjk`): `src/japanese.zig`, `src/gb18030.zig`,
+  `src/big5.zig`, `src/euc_kr.zig`, `gen/layouts.zig`, `gen/layouts/`,
+  `gen/main.zig`, `gen/sources.zig`, the multi-byte `src/tables/`,
+  `test/layout_check.zig`, `test/tables.zig`, and its results files. ASCII
+  and two-byte fast paths, and a table diet measured both ways (tables are
+  2.68x encoding_rs's bytes, euc_kr 4.09x).
+
 ## Decisions to measure
 
 1. **Table layout.** encoding_rs compresses its CJK tables (ranges and
