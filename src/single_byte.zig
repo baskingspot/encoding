@@ -87,9 +87,9 @@ pub const Decoder = struct {
         while (true) {
             // ASCII a block at a time while there is room for it.
             const n = @min(src.len - i, dst.len - o);
-            const ascii = codec.asciiPrefixBlocks(src[i..][0..n]);
+            const ascii = codec.asciiPrefixBlocks(u8, src[i..][0..n]);
             if (ascii != 0) {
-                copyAscii(Unit, dst[o..][0..ascii], src[i..][0..ascii]);
+                codec.copyAscii(Unit, dst[o..][0..ascii], src[i..][0..ascii]);
                 i += ascii;
                 o += ascii;
                 if (i == src.len) return .{ .status = .input_empty, .read = i, .written = o };
@@ -146,20 +146,6 @@ pub const Decoder = struct {
     }
 };
 
-/// Copies ASCII bytes to UTF-8 or widens them to UTF-16.
-inline fn copyAscii(comptime Unit: type, dst: []Unit, src: []const u8) void {
-    if (Unit == u8) {
-        @memcpy(dst, src);
-        return;
-    }
-    const block = codec.ascii_block;
-    var k: usize = 0;
-    while (k < src.len) : (k += block) {
-        const v: @Vector(block, u8) = src[k..][0..block].*;
-        dst[k..][0..block].* = @as(@Vector(block, u16), v);
-    }
-}
-
 pub const Encoder = struct {
     table: *const Table,
     run: Run,
@@ -192,9 +178,9 @@ pub const Encoder = struct {
         var o: usize = 0;
         while (true) {
             const n = @min(src.len - i, dst.len - o);
-            const ascii = asciiUnits(Unit, src[i..][0..n]);
+            const ascii = codec.asciiPrefixBlocks(Unit, src[i..][0..n]);
             if (ascii != 0) {
-                narrowAscii(Unit, dst[o..][0..ascii], src[i..][0..ascii]);
+                codec.narrowAscii(Unit, dst[o..][0..ascii], src[i..][0..ascii]);
                 i += ascii;
                 o += ascii;
             }
@@ -236,32 +222,6 @@ pub const Encoder = struct {
         return if (mode == .fatal) n else codec.mulAdd(n, 8, 0);
     }
 };
-
-/// The units at the start of `src` in whole ASCII blocks.
-inline fn asciiUnits(comptime Unit: type, src: []const Unit) usize {
-    if (Unit == u8) return codec.asciiPrefixBlocks(src);
-    const block = codec.ascii_block;
-    const V = @Vector(block, u16);
-    var k: usize = 0;
-    while (src.len - k >= block) : (k += block) {
-        const v: V = src[k..][0..block].*;
-        if (@reduce(.Or, v >= @as(V, @splat(0x80)))) break;
-    }
-    return k;
-}
-
-inline fn narrowAscii(comptime Unit: type, dst: []u8, src: []const Unit) void {
-    if (Unit == u8) {
-        @memcpy(dst, src);
-        return;
-    }
-    const block = codec.ascii_block;
-    var k: usize = 0;
-    while (k < src.len) : (k += block) {
-        const v: @Vector(block, u16) = src[k..][0..block].*;
-        dst[k..][0..block].* = @as(@Vector(block, u8), @truncate(v));
-    }
-}
 
 const testing = std.testing;
 

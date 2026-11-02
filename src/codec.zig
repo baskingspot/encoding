@@ -271,17 +271,113 @@ pub fn mulAdd(a: usize, b: usize, c: usize) ?usize {
 /// The blocks the ASCII fast paths work in.
 pub const ascii_block = 16;
 
-/// The bytes at the start of `s` in whole ASCII blocks: a multiple of
-/// `ascii_block` at or below the index of the first non-ASCII byte. The
-/// caller finishes the scan byte by byte.
-pub inline fn asciiPrefixBlocks(s: []const u8) usize {
-    const V = @Vector(ascii_block, u8);
+/// The units at the start of `s`, bytes or UTF-16 units, in whole ASCII
+/// blocks: a multiple of `ascii_block` at or below the index of the first
+/// non-ASCII unit. The caller finishes the scan unit by unit.
+pub inline fn asciiPrefixBlocks(comptime Unit: type, s: []const Unit) usize {
+    const V = @Vector(ascii_block, Unit);
     var i: usize = 0;
     while (s.len - i >= ascii_block) : (i += ascii_block) {
         const v: V = s[i..][0..ascii_block].*;
         if (@reduce(.Or, v >= @as(V, @splat(0x80)))) break;
     }
     return i;
+}
+
+/// Copies ASCII bytes to UTF-8, or widens them to UTF-16. `src.len` is a
+/// multiple of `ascii_block`.
+pub inline fn copyAscii(comptime Unit: type, dst: []Unit, src: []const u8) void {
+    if (Unit == u8) {
+        @memcpy(dst, src);
+        return;
+    }
+    var k: usize = 0;
+    while (k < src.len) : (k += ascii_block) {
+        const v: @Vector(ascii_block, u8) = src[k..][0..ascii_block].*;
+        dst[k..][0..ascii_block].* = @as(@Vector(ascii_block, u16), v);
+    }
+}
+
+/// Copies ASCII UTF-8 to bytes, or narrows ASCII UTF-16 units to them.
+/// `src.len` is a multiple of `ascii_block`.
+pub inline fn narrowAscii(comptime Unit: type, dst: []u8, src: []const Unit) void {
+    if (Unit == u8) {
+        @memcpy(dst, src);
+        return;
+    }
+    var k: usize = 0;
+    while (k < src.len) : (k += ascii_block) {
+        const v: @Vector(ascii_block, u16) = src[k..][0..ascii_block].*;
+        dst[k..][0..ascii_block].* = @as(@Vector(ascii_block, u8), @truncate(v));
+    }
+}
+
+/// A bit for each lane of `mask`, lane 0 in the lowest bit. A bool vector
+/// bitcasts lane 0 to the highest bit on big-endian targets.
+pub inline fn highBits(mask: @Vector(ascii_block, bool)) u16 {
+    const bits: u16 = @bitCast(mask);
+    return if (native_endian == .little) bits else @bitReverse(bits);
+}
+
+/// Copies the ASCII bytes at the start of `src`, which starts with one,
+/// to `dst`, widened for UTF-16, a block at a time while both have a block
+/// left, and returns how many it copied. `dst` may hold more after them,
+/// which the caller overwrites.
+pub inline fn asciiRun(comptime Unit: type, src: []const u8, dst: []Unit) usize {
+    const V = @Vector(ascii_block, u8);
+    var k: usize = 0;
+    while (src.len - k >= ascii_block and dst.len - k >= ascii_block) {
+        const v: V = src[k..][0..ascii_block].*;
+        dst[k..][0..ascii_block].* = if (Unit == u8) v else @as(@Vector(ascii_block, u16), v);
+        const high = highBits(v >= @as(V, @splat(0x80)));
+        if (high != 0) return k + @ctz(high);
+        k += ascii_block;
+    }
+    return k;
+}
+
+/// Copies the ASCII units at the start of `src`, UTF-8 or UTF-16 that
+/// starts with one, to `dst`, narrowed, a block at a time while both have
+/// a block left, and returns how many it copied. `dst` may hold more after
+/// them, which the caller overwrites.
+pub inline fn asciiRunOut(comptime Unit: type, src: []const Unit, dst: []u8) usize {
+    const V = @Vector(ascii_block, Unit);
+    var k: usize = 0;
+    while (src.len - k >= ascii_block and dst.len - k >= ascii_block) {
+        const v: V = src[k..][0..ascii_block].*;
+        dst[k..][0..ascii_block].* = if (Unit == u8) v else @as(@Vector(ascii_block, u8), @truncate(v));
+        const high = highBits(v >= @as(V, @splat(0x80)));
+        if (high != 0) return k + @ctz(high);
+        k += ascii_block;
+    }
+    return k;
+}
+
+/// A scalar value an encoder read, and the units it took, as plain
+/// integers. The code point is a `u32`, not a `u21`: LLVM merges a `u21`
+/// from two paths through a three-byte store and a four-byte load, a
+/// store-forwarding stall on every character.
+pub const Read = struct { cp: u32, len: u32 };
+
+/// The scalar value at `src[i]`, `src[i] >= 0x80`, as `readScalar` reads
+/// it, with the three-byte UTF-8 sequences of most non-Latin text inline.
+pub inline fn read(comptime Unit: type, src: []const Unit, i: usize) Read {
+    if (Unit == u8) {
+        const c = src[i];
+        // E0 and ED need narrower second bytes; the others take any.
+        if (c >= 0xE1 and c <= 0xEF and c != 0xED and src.len - i >= 3) {
+            const c1 = src[i + 1];
+            const c2 = src[i + 2];
+            if (c1 & 0xC0 == 0x80 and c2 & 0xC0 == 0x80) {
+                return .{ .cp = @as(u32, c & 0xF) << 12 | @as(u32, c1 & 0x3F) << 6 | (c2 & 0x3F), .len = 3 };
+            }
+        }
+    } else {
+        const u = src[i];
+        if (u < 0xD800 or u > 0xDFFF) return .{ .cp = u, .len = 1 };
+    }
+    const s = readScalar(Unit, src, i);
+    return .{ .cp = s.cp, .len = @intCast(s.len) };
 }
 
 test "put and unitsOf agree with std.unicode" {

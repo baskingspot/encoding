@@ -11,7 +11,6 @@
 
 const std = @import("std");
 const codec = @import("codec.zig");
-const gb18030 = @import("gb18030.zig");
 const index = @import("tables/euc_kr.zig");
 const Encoding = codec.Encoding;
 const DecodeResult = codec.DecodeResult;
@@ -88,7 +87,7 @@ pub const Decoder = struct {
             const b = src[i];
             if (b < 0x80) {
                 if (src.len - i >= codec.ascii_block and dst.len - o >= codec.ascii_block) {
-                    const n = gb18030.asciiRun(Unit, src[i..], dst[o..]);
+                    const n = codec.asciiRun(Unit, src[i..], dst[o..]);
                     i += n;
                     o += n;
                     continue;
@@ -217,7 +216,7 @@ pub const Encoder = struct {
             const c = src[i];
             if (c < 0x80) {
                 if (src.len - i >= codec.ascii_block and dst.len - o >= codec.ascii_block) {
-                    const n = gb18030.asciiRunOut(Unit, src[i..], dst[o..]);
+                    const n = codec.asciiRunOut(Unit, src[i..], dst[o..]);
                     i += n;
                     o += n;
                     continue;
@@ -228,7 +227,7 @@ pub const Encoder = struct {
                 o += 1;
                 continue;
             }
-            const s = gb18030.readScalar(Unit, src, i);
+            const s = codec.read(Unit, src, i);
             const cp: u21 = @intCast(s.cp);
             if (index.encode(cp)) |pointer| {
                 if (dst.len - o < 2) return .{ .status = .output_full, .read = i, .written = o };

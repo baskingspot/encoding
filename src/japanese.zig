@@ -331,7 +331,7 @@ pub const Decoder = struct {
                     while (src.len - i >= block and dst.len - o >= block) {
                         const v: @Vector(block, u8) = src[i..][0..block].*;
                         if (@reduce(.Or, v >= @as(@Vector(block, u8), @splat(0x80)))) break;
-                        copyAscii(Unit, dst[o..][0..block], src[i..][0..block]);
+                        codec.copyAscii(Unit, dst[o..][0..block], src[i..][0..block]);
                         i += block;
                         o += block;
                     }
@@ -388,8 +388,8 @@ pub const Decoder = struct {
                         // escapes.
                         const start = i;
                         const n = @min(src.len - i, dst.len - o);
-                        const k = isoAsciiBlocks(src[i..][0..n]);
-                        copyAscii(Unit, dst[o..][0..k], src[i..][0..k]);
+                        const k = isoAsciiUnits(u8, src[i..][0..n]);
+                        codec.copyAscii(Unit, dst[o..][0..k], src[i..][0..k]);
                         i += k;
                         o += k;
                         while (i < src.len and o < dst.len) : (i += 1) {
@@ -473,36 +473,6 @@ pub const Decoder = struct {
         }
     }
 };
-
-/// The bytes at the start of `s` in whole blocks of ASCII with no 0x0E,
-/// 0x0F, or 0x1B: what ISO-2022-JP's ASCII state copies.
-inline fn isoAsciiBlocks(s: []const u8) usize {
-    const block = codec.ascii_block;
-    const V = @Vector(block, u8);
-    var i: usize = 0;
-    while (s.len - i >= block) : (i += block) {
-        const v: V = s[i..][0..block].*;
-        const bad = (v >= @as(V, @splat(0x80))) | (v == @as(V, @splat(0x0E))) |
-            (v == @as(V, @splat(0x0F))) | (v == @as(V, @splat(0x1B)));
-        if (@reduce(.Or, bad)) break;
-    }
-    return i;
-}
-
-/// Copies ASCII bytes to UTF-8 or widens them to UTF-16.
-inline fn copyAscii(comptime Unit: type, dst: []Unit, src: []const u8) void {
-    if (Unit == u8) {
-        @memcpy(dst, src);
-        return;
-    }
-    const block = codec.ascii_block;
-    var k: usize = 0;
-    while (src.len - k >= block) : (k += block) {
-        const v: @Vector(block, u8) = src[k..][0..block].*;
-        dst[k..][0..block].* = @as(@Vector(block, u16), v);
-    }
-    for (src[k..], dst[k..]) |b, *u| u.* = b;
-}
 
 /// What a code point encodes to: up to two bytes, `len` 0 when it has
 /// none.
@@ -605,7 +575,7 @@ pub const Encoder = struct {
                 // ASCII, short of SO, SI, and ESC.
                 const n = @min(src.len - i, dst.len - o);
                 const k = isoAsciiUnits(Unit, src[i..][0..n]);
-                narrowAscii(Unit, dst[o..][0..k], src[i..][0..k]);
+                codec.narrowAscii(Unit, dst[o..][0..k], src[i..][0..k]);
                 i += k;
                 o += k;
                 while (i < src.len and o < dst.len) : (i += 1) {
@@ -619,7 +589,7 @@ pub const Encoder = struct {
                 // Characters index jis0208 has, other than those the
                 // handler changes first.
                 while (i < src.len and dst.len - o >= 2) {
-                    const s = readScalar(Unit, src, i);
+                    const s = codec.read(Unit, src, i);
                     if (s.cp < 0x80 or s.cp == 0xA5 or s.cp == 0x203E or s.cp == 0x2212 or
                         (s.cp >= 0xFF61 and s.cp <= 0xFF9F)) break;
                     const p = jis0208.encode(@intCast(s.cp)) orelse break;
@@ -630,7 +600,7 @@ pub const Encoder = struct {
                 }
                 if (i == src.len) break;
             }
-            const s = readScalar(Unit, src, i);
+            const s = codec.read(Unit, src, i);
             // The standard's handler; an escape restores the code point to
             // the queue, so it runs again in the new state.
             const unmappable: u21 = while (true) {
@@ -733,7 +703,7 @@ fn encodeTwoByte(
                 while (src.len - i >= block and dst.len - o >= block) {
                     const v: @Vector(block, Unit) = src[i..][0..block].*;
                     if (@reduce(.Or, v >= @as(@Vector(block, Unit), @splat(0x80)))) break;
-                    narrowAscii(Unit, dst[o..][0..block], src[i..][0..block]);
+                    codec.narrowAscii(Unit, dst[o..][0..block], src[i..][0..block]);
                     i += block;
                     o += block;
                 }
@@ -744,7 +714,7 @@ fn encodeTwoByte(
                 }
                 continue;
             }
-            const s = readScalar(Unit, src, i);
+            const s = codec.read(Unit, src, i);
             const bytes = map(@intCast(s.cp));
             if (bytes.len == 0) break;
             dst[o] = bytes.b[0];
@@ -754,7 +724,7 @@ fn encodeTwoByte(
         }
         if (i == src.len) return .{ .status = .input_empty, .read = i, .written = o };
         // Then one character with room checks, or an error.
-        const s = readScalar(Unit, src, i);
+        const s = codec.read(Unit, src, i);
         const bytes = map(@intCast(s.cp));
         if (bytes.len != 0) {
             if (dst.len - o < bytes.len) return .{ .status = .output_full, .read = i, .written = o };
@@ -775,44 +745,9 @@ fn encodeTwoByte(
     }
 }
 
-/// A scalar value read from an encoder's input. (A u32: a u21 in a
-/// struct goes through memory as three bytes and back as four, which
-/// stalls the loop.)
-const Scalar = struct { cp: u32, len: usize };
-
-/// `codec.readScalar`, with the three-byte UTF-8 sequences that kana and
-/// kanji are read inline.
-inline fn readScalar(comptime Unit: type, src: []const Unit, i: usize) Scalar {
-    if (Unit == u8 and src.len - i >= 3) {
-        const b0: u32 = src[i];
-        const b1: u32 = src[i + 1];
-        const b2: u32 = src[i + 2];
-        // E1 to EC and EE to EF take any continuation bytes; E0 and ED
-        // (overlongs and surrogates) go the long way.
-        if (b0 >= 0xE1 and b0 <= 0xEF and b0 != 0xED and b1 & 0xC0 == 0x80 and b2 & 0xC0 == 0x80) {
-            return .{ .cp = (b0 & 0x0F) << 12 | (b1 & 0x3F) << 6 | (b2 & 0x3F), .len = 3 };
-        }
-    }
-    const s = codec.readScalar(Unit, src, i);
-    return .{ .cp = s.cp, .len = s.len };
-}
-
-/// The units at the start of `src` in whole ASCII blocks.
-inline fn asciiUnits(comptime Unit: type, src: []const Unit) usize {
-    if (Unit == u8) return codec.asciiPrefixBlocks(src);
-    const block = codec.ascii_block;
-    const V = @Vector(block, u16);
-    var k: usize = 0;
-    while (src.len - k >= block) : (k += block) {
-        const v: V = src[k..][0..block].*;
-        if (@reduce(.Or, v >= @as(V, @splat(0x80)))) break;
-    }
-    return k;
-}
-
-/// The units at the start of `src` in whole blocks of ASCII with no
-/// U+000E, U+000F, or U+001B, which ISO-2022-JP's ASCII state writes as
-/// they are.
+/// The units at the start of `src`, bytes or UTF-16 units, in whole
+/// blocks of ASCII with no 0x0E, 0x0F, or 0x1B: what ISO-2022-JP's ASCII
+/// state copies, decoding or encoding.
 inline fn isoAsciiUnits(comptime Unit: type, src: []const Unit) usize {
     const block = codec.ascii_block;
     const V = @Vector(block, Unit);
@@ -824,19 +759,6 @@ inline fn isoAsciiUnits(comptime Unit: type, src: []const Unit) usize {
         if (@reduce(.Or, bad)) break;
     }
     return k;
-}
-
-inline fn narrowAscii(comptime Unit: type, dst: []u8, src: []const Unit) void {
-    if (Unit == u8) {
-        @memcpy(dst, src);
-        return;
-    }
-    const block = codec.ascii_block;
-    var k: usize = 0;
-    while (k < src.len) : (k += block) {
-        const v: @Vector(block, u16) = src[k..][0..block].*;
-        dst[k..][0..block].* = @as(@Vector(block, u8), @truncate(v));
-    }
 }
 
 const testing = std.testing;

@@ -122,7 +122,7 @@ pub const Decoder = struct {
             const b = src[i];
             if (b < 0x80) {
                 if (src.len - i >= codec.ascii_block and dst.len - o >= codec.ascii_block) {
-                    const n = asciiRun(Unit, src[i..], dst[o..]);
+                    const n = codec.asciiRun(Unit, src[i..], dst[o..]);
                     i += n;
                     o += n;
                     continue;
@@ -252,74 +252,6 @@ pub const Decoder = struct {
     }
 };
 
-/// A bit for each lane of `mask`, lane 0 in the lowest bit. A bool vector
-/// bitcasts lane 0 to the highest bit on big-endian targets.
-inline fn highBits(mask: @Vector(codec.ascii_block, bool)) u16 {
-    const bits: u16 = @bitCast(mask);
-    return if (codec.native_endian == .little) bits else @bitReverse(bits);
-}
-
-/// Copies the ASCII bytes at the start of `src`, which starts with one,
-/// to `dst`, widened for UTF-16, a block at a time while both have a block
-/// left, and returns how many it copied. `dst` may hold more after them,
-/// which the caller overwrites.
-pub inline fn asciiRun(comptime Unit: type, src: []const u8, dst: []Unit) usize {
-    const block = codec.ascii_block;
-    const V = @Vector(block, u8);
-    var k: usize = 0;
-    while (src.len - k >= block and dst.len - k >= block) {
-        const v: V = src[k..][0..block].*;
-        dst[k..][0..block].* = if (Unit == u8) v else @as(@Vector(block, u16), v);
-        const high = highBits(v >= @as(V, @splat(0x80)));
-        if (high != 0) return k + @ctz(high);
-        k += block;
-    }
-    return k;
-}
-
-/// Copies the ASCII units at the start of `src`, UTF-8 or UTF-16 that
-/// starts with one, to `dst`, narrowed, a block at a time while both have
-/// a block left, and returns how many it copied.
-pub inline fn asciiRunOut(comptime Unit: type, src: []const Unit, dst: []u8) usize {
-    const block = codec.ascii_block;
-    const V = @Vector(block, Unit);
-    var k: usize = 0;
-    while (src.len - k >= block and dst.len - k >= block) {
-        const v: V = src[k..][0..block].*;
-        dst[k..][0..block].* = if (Unit == u8) v else @as(@Vector(block, u8), @truncate(v));
-        const high = highBits(v >= @as(V, @splat(0x80)));
-        if (high != 0) return k + @ctz(high);
-        k += block;
-    }
-    return k;
-}
-
-/// A scalar value an encoder read and the units it took. The code point is
-/// a u32, not a u21: LLVM merges a u21 from two paths through a three-byte
-/// store and a four-byte load, a store-forwarding stall on every character.
-pub const Read = struct { cp: u32, len: u32 };
-
-/// The scalar value at `src[i]`, `src[i] >= 0x80`, as `codec.readScalar`
-/// reads it, with the three-byte UTF-8 sequences of CJK text inline.
-pub inline fn readScalar(comptime Unit: type, src: []const Unit, i: usize) Read {
-    if (Unit == u8) {
-        const c = src[i];
-        // E0 and ED need narrower second bytes; the others take any.
-        if (c >= 0xE1 and c <= 0xEF and c != 0xED and src.len - i >= 3) {
-            const c1 = src[i + 1];
-            const c2 = src[i + 2];
-            if (c1 & 0xC0 == 0x80 and c2 & 0xC0 == 0x80) {
-                return .{ .cp = @as(u32, c & 0xF) << 12 | @as(u32, c1 & 0x3F) << 6 | (c2 & 0x3F), .len = 3 };
-            }
-        }
-    } else {
-        const u = src[i];
-        if (u < 0xD800 or u > 0xDFFF) return .{ .cp = u, .len = 1 };
-    }
-    const s = codec.readScalar(Unit, src, i);
-    return .{ .cp = s.cp, .len = @intCast(s.len) };
-}
-
 /// Up to four bytes of output, for an encoder's character.
 pub const Bytes = struct { b: [4]u8, len: u8 };
 
@@ -403,7 +335,7 @@ pub const Encoder = struct {
             const c = src[i];
             if (c < 0x80) {
                 if (src.len - i >= codec.ascii_block and dst.len - o >= codec.ascii_block) {
-                    const n = asciiRunOut(Unit, src[i..], dst[o..]);
+                    const n = codec.asciiRunOut(Unit, src[i..], dst[o..]);
                     i += n;
                     o += n;
                     continue;
@@ -414,7 +346,7 @@ pub const Encoder = struct {
                 o += 1;
                 continue;
             }
-            const s = readScalar(Unit, src, i);
+            const s = codec.read(Unit, src, i);
             // A code point in index gb18030, the common case: none of the
             // standard's earlier steps applies to one, except GBK's U+20AC.
             if (!(e.gbk and s.cp == 0x20AC)) {
@@ -444,7 +376,7 @@ pub const Encoder = struct {
         src: []const Unit,
         dst: []u8,
         mode: codec.EncoderMode,
-        s: Read,
+        s: codec.Read,
         at: *Pos,
     ) ?EncodeResult {
         _ = src;
