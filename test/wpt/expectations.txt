@@ -9,9 +9,10 @@ SKIP encoding/streams/invalid-realm.window.js -- needs a second browsing context
 SKIP encoding/streams/realms.window.js -- needs srcdoc iframes as separate realms and postMessage between them
 SKIP encoding/legacy-mb-japanese/iso-2022-jp/iso2022jp-encode-form-errors-stateful.html -- needs a data: URL document that runs script and posts a message to its parent
 
+# Tests that contradict the standard, which wins.
+FAIL encoding/textdecoder-mistakes.any.js :: fatal stream: utf-8 -- expects a fatal streaming error to drop the unread input; the standard's decode() keeps it in the I/O queue, so the next call reads 0xEF and throws
+
 # Encodings this version does not implement yet. Each failure names the
 # encoding; the wave that adds one deletes its line.
-FAIL encoding/legacy-mb-japanese/*/*-decode-errors.html -- the harness's iframe documents keep only <span data-cp data-bytes> elements, and these pages use plain <span>s
-FAIL encoding/textdecoder-mistakes.any.js :: EUC-JP JIS0212 state after a fatal streaming error -- the shim drops a streaming call's unread input after a fatal error (as "fatal stream: utf-8" expects); this test expects the byte EUC-JP restored kept for the next call
 FAIL encoding/** :: /(GBK|gb18030|Big5) is not implemented yet/ -- Chinese encodings: not implemented yet
 FAIL encoding/** :: /EUC-KR is not implemented yet/ -- Korean encoding: not implemented yet

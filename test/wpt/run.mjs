@@ -87,7 +87,7 @@ const lib = {
       const written = Number(X.lastWritten());
       text += Buffer.from(X.memory.buffer, OUT, written * 2).toString("utf16le");
       at += Number(X.lastRead());
-      if (status === 2) return { text, error: true };
+      if (status === 2) return { text, error: true, rest: bytes.subarray(at) };
     } while (at < bytes.length);
     return { text, error: false };
   },
@@ -175,6 +175,9 @@ function installShim(g, lib) {
     #ignoreBOM;
     #h = -1;
     #noFlush = false;
+    // What a fatal error left unread in a streaming call, which the
+    // standard keeps in the decoder's I/O queue for the next call.
+    #queued = new Uint8Array(0);
     constructor(label = "utf-8", options = undefined) {
       const o = dict(options);
       const fatal = Boolean(o.fatal);
@@ -207,18 +210,26 @@ function installShim(g, lib) {
         // The standard's TextDecoder removes the encoding's own byte
         // order mark unless told to ignore it, and sniffs no other.
         this.#h = lib.decoderNew(this.#enc, this.#fatal, this.#ignoreBOM || !isUtf(this.#name) ? 2 : 1);
+        this.#queued = new Uint8Array(0);
       }
       this.#noFlush = stream;
+      const queued = new Uint8Array(this.#queued.length + bytes.length);
+      queued.set(this.#queued);
+      queued.set(bytes, this.#queued.length);
+      this.#queued = new Uint8Array(0);
       let r;
       try {
-        r = lib.decode(this.#h, bytes.slice(), !stream);
+        r = lib.decode(this.#h, queued, !stream);
       } finally {
         if (!stream) {
           lib.decoderFree(this.#h);
           this.#h = -1;
         }
       }
-      if (r.error) throw new TypeError("The encoded data was not valid.");
+      if (r.error) {
+        if (stream) this.#queued = r.rest.slice();
+        throw new TypeError("The encoded data was not valid.");
+      }
       return r.text;
     }
   }
@@ -649,9 +660,9 @@ function makeDocument(ctx, file, page) {
         const res = fetchResource(file, el.src);
         const d = decodeDocument(res, lib.name(page.encoding));
         if (!lib.isImplemented(d.encoding)) throw new Error(`${lib.name(d.encoding)} is not implemented yet`);
-        const nodes = [...d.text.matchAll(/<span data-cp="([^"]*)" data-bytes="([^"]*)">([\s\S]*?)<\/span>/g)].map((m) => ({
-          dataset: { cp: m[1], bytes: m[2] },
-          textContent: decodeEntities(m[3]),
+        const nodes = [...d.text.matchAll(/<span\b([^>]*)>([\s\S]*?)<\/span>/g)].map((m) => ({
+          dataset: { cp: attr(m[1], "data-cp"), bytes: attr(m[1], "data-bytes") },
+          textContent: decodeEntities(m[2]),
         }));
         const name = lib.name(d.encoding);
         doc = {
