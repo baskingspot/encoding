@@ -187,13 +187,16 @@ file.
   `chinese_rank` layout. Decode 1.23x and 1.28x encoding_rs geomean (to
   UTF-8 and UTF-16), encode 3.5x and 4.7x; 16-byte decode 0.72x, in the
   shared decoder path. Table 89,094 bytes against encoding_rs's 21,770.
-- **Core and IBM** (branch `wave1-core`): the shared codec pieces and the
-  IBM code pages. `src/codec.zig`, `src/Decoder.zig`, `src/Encoder.zig`,
-  `src/single_byte.zig`, `src/japanese.zig`, `src/gb18030.zig`,
-  `src/big5.zig`, `gen/layouts.zig`, `gen/layouts/`, `gen/main.zig`,
-  `gen/sources.zig` except Korean's line, `test/tables.zig`, the
-  `bench-rodata` code, and its results files.
-
+- **Core and IBM** (landed at `d72503e`; core-20261102.md):
+  `Decoder.init` and `Encoder.init` copy a fresh state from a compile-time
+  table, so a family adds an entry rather than a branch; 16-byte calls 22.8
+  to 16.7 ns geomean. Encoders read with `codec.read(Unit, src, i, first)`,
+  a u32 code point with 2- and 3-byte UTF-8 inline; single-byte encode from
+  UTF-8 is 2.6-3.2x faster. The tables' `decode` returns a u32, 0 for none:
+  +10.9% CJK decode. The ASCII runs and the reader are shared in
+  `codec.zig`. IBM437 and IBM850 are single-byte tables. test-layouts keeps
+  flat, japanese_paged, and chinese_rank. Tables are 333,075 bytes against
+  encoding_rs's 124,497.
 - **Compile-time decoders** (branch `wave1-comptime`): a decoder and
   encoder specialized at compile time to one encoding, so a program that
   uses one links only that encoding's code and tables
@@ -229,7 +232,9 @@ file.
    or use `u32`. The same holds for any optional in a hot loop:
    `codec.tryPut`'s `?usize` and a captured `?u21` from a table's `decode`
    both go through the stack every character. Unwrap at once (`orelse 0`),
-   or return an integer with a sentinel.
+   or return an integer with a sentinel. Never build a tagged union one branch
+   per variant and then copy it (a store-forwarding stall); copy a value
+   built at compile time.
 2. **Encoder lookups.** Encoding to a CJK encoding needs a reverse map from
    code point to bytes: a search over the decode table, a generated
    perfect hash, or a ranged reverse table. Same two-sided measurement.
