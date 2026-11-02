@@ -4,19 +4,19 @@
 //! few enough pages) gives each page of pointers its place among the
 //! pages kept, every empty one sharing one page of zeros. A lookup is a
 //! shift, a page number, and a cell, with no check within the page.
-//! Encoding: as the two-level layout does (japanese_rows.zig), a 64-bit
-//! map of each 64 code points and a popcount into the pointers in code
-//! point order.
+//! Encoding: the code points in blocks of 64, a block index for each, and
+//! for each block that has any a 64-bit map of them and where its pointers
+//! start in a list of pointers in code point order; a lookup is a block, a
+//! bit test, and a popcount.
 
 const std = @import("std");
 const index = @import("../index.zig");
 const layouts = @import("../layouts.zig");
-const rows = @import("japanese_rows.zig");
 const MultiByte = @import("../sources.zig").MultiByte;
 
 pub fn emit(w: *std.Io.Writer, gpa: std.mem.Allocator, src: MultiByte, entries: []const index.Entry) !void {
     if (src.decode) try emitDecode(w, gpa, entries);
-    if (src.encode) try rows.emitEncode(w, gpa, src, entries);
+    if (src.encode) try emitEncode(w, gpa, src, entries);
 }
 
 const Pages = struct { shift: u5, page_of: []u32, cells: []u21 };
@@ -86,6 +86,83 @@ fn emitDecode(w: *std.Io.Writer, gpa: std.mem.Allocator, entries: []const index.
         \\    return @intCast(cp);
         \\}
         \\
+        \\
+    );
+}
+
+fn emitEncode(w: *std.Io.Writer, gpa: std.mem.Allocator, src: MultiByte, entries: []const index.Entry) !void {
+    const pairs = try layouts.encodePairs(gpa, src, entries);
+    defer gpa.free(pairs);
+    const top_len = pairs[pairs.len - 1].cp / 64 + 1;
+    const top = try gpa.alloc(u32, top_len);
+    defer gpa.free(top);
+    @memset(top, 0);
+    // Block 0 is the empty block every block with no code point uses.
+    var bits: std.ArrayList(u64) = .empty;
+    defer bits.deinit(gpa);
+    var bases: std.ArrayList(u32) = .empty;
+    defer bases.deinit(gpa);
+    try bits.append(gpa, 0);
+    try bases.append(gpa, 0);
+    const pointers = try gpa.alloc(u32, pairs.len);
+    defer gpa.free(pointers);
+    for (pairs, 0..) |p, i| {
+        const b = p.cp / 64;
+        if (top[b] == 0) {
+            top[b] = @intCast(bits.items.len);
+            try bits.append(gpa, 0);
+            try bases.append(gpa, @intCast(i));
+        }
+        bits.items[top[b]] |= @as(u64, 1) << @intCast(p.cp % 64);
+        pointers[i] = p.pointer;
+    }
+    try w.print(
+        \\/// The block of each 64 code points, 0 for one with none.
+        \\const block_of = [{d}]{s}{{
+        \\
+    , .{ top_len, if (bits.items.len <= 256) "u8" else "u16" });
+    try layouts.writeHex(w, u32, top);
+    try w.print(
+        \\}};
+        \\
+        \\/// Each block's code points, a bit each.
+        \\const block_bits = [{d}]u64{{
+        \\
+    , .{bits.items.len});
+    // Four to a line: `layouts.writeHex`'s dozen is too wide for u64.
+    for (bits.items, 0..) |v, i| {
+        if (i % 4 == 0) try w.writeAll("   ");
+        try w.print(" 0x{X:0>16},", .{v});
+        if (i % 4 == 3 or i == bits.items.len - 1) try w.writeAll("\n");
+    }
+    try w.print(
+        \\}};
+        \\
+        \\/// Where each block's pointers start in `encode_pointers`.
+        \\const block_base = [{d}]u16{{
+        \\
+    , .{bases.items.len});
+    try layouts.writeHex(w, u32, bases.items);
+    try w.print(
+        \\}};
+        \\
+        \\/// The index pointer of each code point, in code point order.
+        \\const encode_pointers = [{d}]u16{{
+        \\
+    , .{pointers.len});
+    try layouts.writeHex(w, u32, pointers);
+    try w.writeAll(
+        \\};
+        \\
+        \\pub fn encode(cp: u21) ?u16 {
+        \\    const hi = cp >> 6;
+        \\    if (hi >= block_of.len) return null;
+        \\    const b = block_of[hi];
+        \\    const map = block_bits[b];
+        \\    const bit = @as(u64, 1) << @intCast(cp & 63);
+        \\    if (map & bit == 0) return null;
+        \\    return encode_pointers[block_base[b] + @popCount(map & (bit - 1))];
+        \\}
         \\
     );
 }

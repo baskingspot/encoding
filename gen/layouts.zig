@@ -13,9 +13,12 @@
 //!     pub fn emit(w: *std.Io.Writer, gpa: std.mem.Allocator, src: MultiByte,
 //!         entries: []const index.Entry) !void
 //!
-//! and one line in `impls`. `flat` is the baseline. Plan decisions 1 and 2
-//! add layouts (ranged, two-level, perfect hash, ...), measured against
-//! flat; `zig build test-layouts` checks every layout on every index.
+//! and one line in `impls`. `flat` is the baseline, and the other two are
+//! the ones plan decisions 1 and 2 settled on; the rows, ranged, and hash
+//! layouts measured against them are written up in
+//! docs/slop/results/japanese-tables-20261102.md and
+//! chinese-layouts-20261102.md. `zig build test-layouts` checks every
+//! layout on every index.
 
 const std = @import("std");
 const index = @import("index.zig");
@@ -27,13 +30,10 @@ const impls = .{
     // code points sorted with their pointers, searched by bisection.
     .flat = @import("layouts/flat.zig"), // ziglint-ignore: Z028
 
-    // Wave 1, Japanese: its layouts.
-    .japanese_rows = @import("layouts/japanese_rows.zig"), // ziglint-ignore: Z028
+    // Wave 1, Japanese: decode in pages, encode by rank.
     .japanese_paged = @import("layouts/japanese_paged.zig"), // ziglint-ignore: Z028
-    .japanese_ranged = @import("layouts/japanese_ranged.zig"), // ziglint-ignore: Z028
-    .japanese_hash = @import("layouts/japanese_hash.zig"), // ziglint-ignore: Z028
 
-    // Wave 1, Chinese: its layouts.
+    // Wave 1, Chinese: decode flat with a plane-2 bit, encode by rank.
     .chinese_rank = @import("layouts/chinese_rank.zig"), // ziglint-ignore: Z028
 };
 
