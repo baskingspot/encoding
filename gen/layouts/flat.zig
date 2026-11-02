@@ -33,7 +33,8 @@ pub fn emit(w: *std.Io.Writer, gpa: std.mem.Allocator, src: MultiByte, entries: 
             \\pub fn decode(pointer: u32) ?u21 {
             \\    if (pointer >= decode_table.len) return null;
             \\    const cp = decode_table[pointer];
-            \\    return if (cp == 0) null else @intCast(cp);
+            \\    if (cp == 0) return null;
+            \\    return @intCast(cp);
             \\}
             \\
             \\
