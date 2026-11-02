@@ -1,0 +1,32 @@
+# The texts `just bench-corpus` fetches into bench/corpus-gen/sources/ and
+# bench/corpus/SHA256SUMS pins: one Wikipedia article's wikitext per
+# language, at a fixed revision, CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/)
+# by the article's contributors, whose history is at the URL without
+# action=raw. bench/encodings.tsv picks each encoding's language.
+#name	url
+en	https://en.wikipedia.org/w/index.php?action=raw&oldid=1383113187
+fr	https://fr.wikipedia.org/w/index.php?action=raw&oldid=240924045
+de	https://de.wikipedia.org/w/index.php?action=raw&oldid=271572491
+es	https://es.wikipedia.org/w/index.php?action=raw&oldid=175886265
+pl	https://pl.wikipedia.org/w/index.php?action=raw&oldid=80882464
+cs	https://cs.wikipedia.org/w/index.php?action=raw&oldid=26230482
+ru	https://ru.wikipedia.org/w/index.php?action=raw&oldid=155936974
+uk	https://uk.wikipedia.org/w/index.php?action=raw&oldid=49065011
+el	https://el.wikipedia.org/w/index.php?action=raw&oldid=11894883
+tr	https://tr.wikipedia.org/w/index.php?action=raw&oldid=38108422
+he	https://he.wikipedia.org/w/index.php?action=raw&oldid=44136499
+ar	https://ar.wikipedia.org/w/index.php?action=raw&oldid=77117358
+lt	https://lt.wikipedia.org/w/index.php?action=raw&oldid=7933336
+lv	https://lv.wikipedia.org/w/index.php?action=raw&oldid=4479260
+vi	https://vi.wikipedia.org/w/index.php?action=raw&oldid=75666098
+th	https://th.wikipedia.org/w/index.php?action=raw&oldid=13364758
+mt	https://mt.wikipedia.org/w/index.php?action=raw&oldid=332155
+is	https://is.wikipedia.org/w/index.php?action=raw&oldid=1974383
+cy	https://cy.wikipedia.org/w/index.php?action=raw&oldid=15476844
+fi	https://fi.wikipedia.org/w/index.php?action=raw&oldid=24343906
+ro	https://ro.wikipedia.org/w/index.php?action=raw&oldid=18071734
+ja	https://ja.wikipedia.org/w/index.php?action=raw&oldid=111604466
+zh	https://zh.wikipedia.org/w/index.php?action=raw&oldid=95334029
+yue	https://zh-yue.wikipedia.org/w/index.php?action=raw&oldid=2411212
+ko	https://ko.wikipedia.org/w/index.php?action=raw&oldid=42562205
+hi	https://hi.wikipedia.org/w/index.php?action=raw&oldid=6631096

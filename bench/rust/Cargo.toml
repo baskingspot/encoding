@@ -1,0 +1,24 @@
+[package]
+name = "bench-rust"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# The bar (bench/README.md); the same release as the oracle's Cargo.lock.
+encoding_rs = "=0.8.44"
+# The corpus generator's decompositions, for encodings such as
+# windows-1258 that write a letter as a base and a combining mark.
+unicode-normalization = "0.1"
+
+[[bin]]
+name = "bench-rust"
+path = "src/main.rs"
+
+[[bin]]
+name = "bench-corpus"
+path = "src/bin/bench-corpus.rs"
+
+[profile.release]
+codegen-units = 1
+lto = true

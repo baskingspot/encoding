@@ -1,0 +1,46 @@
+# Every encoding the benchmarks cover, read by every arm and by the corpus
+# generator: the encoding's name (bench/corpus-gen/<name>/ holds its
+# inputs), and the language of its realistic inputs, a source in
+# bench/corpus/sources.tsv. An arm without an encoding skips it.
+#name	lang
+UTF-8	hi
+IBM866	ru
+ISO-8859-2	pl
+ISO-8859-3	mt
+ISO-8859-4	lt
+ISO-8859-5	ru
+ISO-8859-6	ar
+ISO-8859-7	el
+ISO-8859-8	he
+ISO-8859-8-I	he
+ISO-8859-10	is
+ISO-8859-13	lv
+ISO-8859-14	cy
+ISO-8859-15	fi
+ISO-8859-16	ro
+KOI8-R	ru
+KOI8-U	uk
+macintosh	de
+windows-874	th
+windows-1250	cs
+windows-1251	ru
+windows-1252	fr
+windows-1253	el
+windows-1254	tr
+windows-1255	he
+windows-1256	ar
+windows-1257	lt
+windows-1258	vi
+x-mac-cyrillic	ru
+GBK	zh
+gb18030	zh
+Big5	yue
+EUC-JP	ja
+ISO-2022-JP	ja
+Shift_JIS	ja
+EUC-KR	ko
+UTF-16BE	ar
+UTF-16LE	ja
+x-user-defined	en
+IBM437	de
+IBM850	es
