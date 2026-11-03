@@ -441,3 +441,37 @@ detect-variants NAMES="hybrid pairs unigram max joint split-latin k256 k1024 k20
     done
     zig-out/bin/detect-score report zig-out/detect/samples.txt "${arms[@]}" > zig-out/detect/variants.md
     echo "accuracy: zig-out/detect/variants.md"
+
+# The one-call conversions and the stream adapters (src/convert.zig,
+# src/io.zig), measured by bench/io/.
+
+[doc("Time the one-call conversions against calling Decoder and Encoder directly (16 B to 64 KiB), and DecodingReader and EncodingWriter against a loop of calls, interleaved on one CPU, then benchstat. Needs `just bench-corpus`")]
+[group("bench")]
+bench-io ROUNDS="12" CPU="3":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    (cd bench/io && zig build bench)
+    out=zig-out/io-bench
+    lscpu | grep -E '^Model name' || true
+    for mode in percall adapters; do
+        taskset -c {{ CPU }} bench/io/zig-out/bin/bench-io "$mode" {{ ROUNDS }} "$out/$mode"
+    done
+    benchstat "$out/percall/direct.txt" "$out/percall/convert.txt" | tee "$out/percall.txt"
+    benchstat "$out/adapters/direct.txt" "$out/adapters/adapter.txt" "$out/adapters/adapter64.txt" | tee "$out/adapters.txt"
+
+[doc("The .rodata and .text each way of calling the conversions and adapters links, in ReleaseSmall and ReleaseFast, net of a program that copies stdin to stdout (bench/io/size.zig)")]
+[group("bench")]
+bench-io-sizes:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd bench/io
+    for mode in ReleaseSmall ReleaseFast; do
+        zig build sizes -Doptimize="$mode" -p "zig-out/$mode"
+        echo "== $mode"
+        printf '%-18s %9s %9s %9s %9s\n' program rodata text +rodata +text
+        read -r r0 t0 < <(size -A "zig-out/$mode/bin/size-none" | awk '$1==".rodata"{r=$2} $1==".text"{t=$2} END{print r, t}')
+        for f in "zig-out/$mode"/bin/size-*; do
+            read -r r t < <(size -A "$f" | awk '$1==".rodata"{r=$2} $1==".text"{t=$2} END{print r, t}')
+            printf '%-18s %9d %9d %9d %9d\n' "${f##*/size-}" "$r" "$t" $((r - r0)) $((t - t0))
+        done
+    done

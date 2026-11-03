@@ -1,0 +1,16 @@
+.{
+    .name = .encoding_io,
+    .version = "0.0.0",
+    .fingerprint = 0x372c457b57b5b14c,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        // The package, from this checkout.
+        .encoding = .{ .path = "../.." },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "main.zig",
+        "size.zig",
+    },
+}
