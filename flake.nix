@@ -54,6 +54,9 @@
               util-linux
               time
               curl
+              # The detection scoring harness's uchardet arm
+              # (test/detect/uchardet.c); chardetng comes through Cargo.
+              libuchardet
             ];
           };
         };

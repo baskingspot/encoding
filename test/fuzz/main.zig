@@ -2,12 +2,14 @@
 //! on arbitrary bytes and encoders on arbitrary UTF-8 and UTF-16, checked
 //! for the properties in test/props.zig (no crash or safety panic, output
 //! well-formed, the same output for any split of the input and any output
-//! buffer, UTF-8 and UTF-16 in agreement, max lengths sufficient).
+//! buffer, UTF-8 and UTF-16 in agreement, max lengths sufficient), and the
+//! charset detector on arbitrary bytes and hints (`checkDetector`).
 //!
-//!     fuzz run [--seconds N] [--seed N] [--target decode|encode|all]
+//!     fuzz run [--seconds N] [--seed N] [--target decode|encode|detect|all]
 //!              [--encoding NAME|all] [--out DIR]
 //!     fuzz repro decode NAME FILE
 //!     fuzz repro encode NAME FILE.utf8 FILE.utf16
+//!     fuzz repro detect NAME FILE
 //!
 //! Inputs run in a forked child that copies each one to shared memory
 //! before running it, so a crash, a safety panic, a hang, or a failed
@@ -24,12 +26,12 @@ const linux = std.os.linux;
 
 const max_input = 1 << 16;
 
-const Target = enum { decode, encode };
+const Target = enum { decode, encode, detect };
 
 const Options = struct {
     seconds: u64 = 60,
     seed: ?u64 = null,
-    targets: []const Target = &.{ .decode, .encode },
+    targets: []const Target = &.{ .decode, .encode, .detect },
     encodings: []const Encoding = &encoding.implemented,
     out: []const u8 = "zig-out/fuzz",
 };
@@ -38,9 +40,10 @@ var io: std.Io = undefined;
 const gpa = std.heap.smp_allocator;
 
 const usage =
-    \\usage: fuzz run [--seconds N] [--seed N] [--target decode|encode|all] [--encoding NAME|all] [--out DIR]
+    \\usage: fuzz run [--seconds N] [--seed N] [--target decode|encode|detect|all] [--encoding NAME|all] [--out DIR]
     \\       fuzz repro decode NAME FILE
     \\       fuzz repro encode NAME FILE.utf8 FILE.utf16
+    \\       fuzz repro detect NAME FILE
     \\
 ;
 
@@ -199,6 +202,73 @@ fn runOne(rng: std.Random, target: Target, enc: Encoding, shared: ?*Shared, corp
             }
             try props.checkEncoder(gpa, rng, enc, t.utf8, t.utf16, .{});
         },
+        .detect => {
+            const src = try decoderInput(rng, corpus);
+            defer gpa.free(src);
+            if (shared) |s| {
+                const n = @min(src.len, max_input);
+                @memcpy(s.data8[0..n], src[0..n]);
+                s.len8 = @intCast(n);
+                _ = @atomicRmw(u64, &s.heartbeat, .Add, 1, .seq_cst);
+            }
+            try checkDetector(rng, src);
+        },
+    }
+}
+
+/// The detector's properties on `src`, with random hints: guesses that
+/// are never empty, ranked, with confidences from 0 to 1 that add up to
+/// 1, no UTF-8 when it is not allowed, and the same guesses for any split
+/// of the input, asked for at any point.
+fn checkDetector(rng: std.Random, src: []const u8) !void {
+    const tlds = [_][]const u8{ "jp", "example.co.jp", "RU", "cn", "tw", "kr", "de", "com", "", ".", "il.", "gr" };
+    const langs = [_][]const u8{ "ja", "zh-TW", "zh-Hant-HK", "sr-Latn", "ru", "he", "iw", "x", "-", "_zh", "ko-KR" };
+    var junk: [8]u8 = undefined;
+    rng.bytes(&junk);
+    const pick = struct {
+        fn f(r: std.Random, list: []const []const u8, j: []const u8) ?[]const u8 {
+            const k = r.uintLessThan(usize, list.len + 2);
+            return if (k < list.len) list[k] else if (k == list.len) null else j[0..r.uintAtMost(usize, j.len)];
+        }
+    }.f;
+    const hints: encoding.detect.Hints = .{
+        .tld = pick(rng, &tlds, &junk),
+        .language = pick(rng, &langs, &junk),
+        .allow_utf8 = rng.boolean(),
+    };
+    const Detector = encoding.Detector;
+    const n = Detector.candidates.len;
+
+    var whole: Detector = .init();
+    whole.feed(src);
+    var want: [n]encoding.detect.Guess = undefined;
+    const all = whole.guesses(hints, &want);
+    if (all.len == 0) return error.NoGuess;
+    var sum: f64 = 0;
+    for (all, 0..) |g, i| {
+        if (!(g.confidence >= 0 and g.confidence <= 1)) return error.BadConfidence;
+        if (i > 0 and g.confidence > all[i - 1].confidence) return error.NotRanked;
+        if (g.encoding == .utf_8 and !hints.allow_utf8) return error.Utf8NotAllowed;
+        for (all[0..i]) |h| if (h.encoding == g.encoding) return error.DuplicateGuess;
+        sum += g.confidence;
+    }
+    if (@abs(sum - 1) > 1e-3) return error.ConfidencesDoNotAddUp;
+    if (whole.guess(hints).encoding != all[0].encoding) return error.GuessDisagrees;
+
+    var split: Detector = .init();
+    var at: usize = 0;
+    while (at < src.len) {
+        const len = @min(src.len - at, rng.uintAtMost(usize, 40));
+        split.feed(src[at..][0..len]);
+        at += len;
+        // Asking along the way changes nothing.
+        if (rng.uintLessThan(u8, 4) == 0) _ = split.guess(hints);
+    }
+    var got: [n]encoding.detect.Guess = undefined;
+    const parts = split.guesses(hints, &got);
+    if (parts.len != all.len) return error.SplitDisagrees;
+    for (parts, all) |a, b| {
+        if (a.encoding != b.encoding or a.confidence != b.confidence) return error.SplitDisagrees;
     }
 }
 
@@ -319,6 +389,10 @@ fn record(opts: Options, shared: *Shared, status: Status, log_path: [:0]const u8
             try cwd.writeFile(io, .{ .sub_path = try std.fmt.allocPrint(gpa, "{s}.min", .{base}), .data = min });
             std.debug.print("  input {d} bytes, minimized to {d}: {s}.min\n", .{ data8.len, min.len, base });
         },
+        .detect => {
+            try cwd.writeFile(io, .{ .sub_path = try std.fmt.allocPrint(gpa, "{s}.input", .{base}), .data = data8 });
+            std.debug.print("  input: {s}.input\n", .{base});
+        },
         .encode => {
             try cwd.writeFile(io, .{ .sub_path = try std.fmt.allocPrint(gpa, "{s}.utf8", .{base}), .data = data8 });
             const data16 = std.mem.sliceAsBytes(shared.data16[0..shared.len16]);
@@ -378,6 +452,10 @@ fn repro(args: []const [:0]const u8) !u8 {
             const t16 = try gpa.alloc(u16, b16.len / 2);
             @memcpy(std.mem.sliceAsBytes(t16), b16[0 .. 2 * t16.len]);
             props.checkEncoder(gpa, prng.random(), enc, t8, t16, .{}) catch return 1;
+        },
+        .detect => {
+            const data = try cwd.readFileAlloc(io, args[2], gpa, .limited(max_input));
+            checkDetector(prng.random(), data) catch return 1;
         },
     }
     std.debug.print("ok\n", .{});

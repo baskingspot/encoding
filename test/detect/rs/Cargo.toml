@@ -1,0 +1,31 @@
+[package]
+name = "detect-harness"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# The detection corpus and the chardetng arm of the scoring harness
+# (test/detect/README.md).
+[dependencies]
+# The oracle detection is scored against.
+chardetng = "=0.1.17"
+# The standard's encoders, for the test samples; the release the encoding_rs
+# oracle pins.
+encoding_rs = "=0.8.44"
+# Wikipedia's API answers in JSON.
+serde_json = "1"
+# Decompositions, for windows-1258, which writes Vietnamese as a base and a
+# combining mark.
+unicode-normalization = "0.1"
+
+[[bin]]
+name = "detect-corpus"
+path = "src/bin/detect-corpus.rs"
+
+[[bin]]
+name = "detect-chardetng"
+path = "src/bin/detect-chardetng.rs"
+
+[profile.release]
+codegen-units = 1
+lto = true

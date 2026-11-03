@@ -295,3 +295,134 @@ bench-rodata: bench-build
 [doc("Everything CI runs")]
 [group("ci")]
 ci: test check test-layouts lint fuzz-ci oracle wpt test-big-endian
+
+# Detection (src/detect.zig, test/detect/README.md). The corpus, its
+# training text, and the test samples go under the gitignored zig-out/detect/.
+detect_ua := "baskingspot-encoding-detect/1 (https://github.com/baskingspot/encoding)"
+detect_api := "w/api.php?action=query&format=json&formatversion=2"
+
+# The corpus tool and the chardetng arm, test/detect/rs.
+[private]
+detect-build:
+    cargo build --quiet --release --locked --manifest-path test/detect/rs/Cargo.toml --target-dir zig-out/detect/target
+
+[doc("Pick detection's corpus anew into gen/detect/sources.tsv: 60 random articles of 6000 bytes or more per language, Chinese split by script. Random by design; its output is what is pinned")]
+[group("detect")]
+detect-select: detect-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bin=zig-out/detect/target/release/detect-corpus
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    get() { curl -sSf --retry 3 -A '{{ detect_ua }}' -o "$2" "$1"; sleep 1; }
+    pick() { # WIKI N: N revisions of random long articles, one per line
+        : > "$tmp/picked"
+        for round in 1 2 3 4 5 6; do
+            get "https://$1.wikipedia.org/{{ detect_api }}&generator=random&grnnamespace=0&grnlimit=500&prop=info" "$tmp/info.json"
+            "$bin" select "$tmp/info.json" >> "$tmp/picked"
+            sort -u "$tmp/picked" -o "$tmp/picked.u"
+            [ "$(wc -l < "$tmp/picked.u")" -ge "$2" ] && break
+        done
+        awk '!seen[$0]++' "$tmp/picked" | head -n "$2"
+    }
+    : > "$tmp/sources.tsv"
+    grep '^#' gen/detect/sources.tsv > "$tmp/sources.tsv"
+    grep -v '^#' gen/detect/sources.tsv | while IFS=$'\t' read -r lang wiki group _; do
+        if [ "$wiki" = zh ]; then
+            if [ ! -f "$tmp/zh.split" ]; then
+                pick zh 600 > "$tmp/zh.revs"
+                split -l 50 "$tmp/zh.revs" "$tmp/zh.batch."
+                for b in "$tmp"/zh.batch.*; do
+                    get "https://zh.wikipedia.org/{{ detect_api }}&prop=revisions&rvprop=ids|content&rvslots=main&revids=$(paste -sd'|' "$b")" "$b.json"
+                    "$bin" zh-split "$b.json" >> "$tmp/zh.split"
+                done
+            fi
+            revs=$(awk -v s="${lang#zh-}" '$1 == s { print $2 }' "$tmp/zh.split" | head -n 60)
+        else
+            revs=$(pick "$wiki" 60)
+        fi
+        printf '%s\t%s\t%s\t%s\n' "$lang" "$wiki" "$group" "$(echo "$revs" | paste -sd,)" >> "$tmp/sources.tsv"
+        echo "$lang: $(echo "$revs" | grep -c .) articles"
+    done
+    cp "$tmp/sources.tsv" gen/detect/sources.tsv
+
+[doc("Fetch detection's corpus (gen/detect/sources.tsv) into zig-out/detect/wiki/, check it against gen/detect/SHA256SUMS, and write the training text and the test samples")]
+[group("detect")]
+detect-corpus: detect-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bin=zig-out/detect/target/release/detect-corpus
+    grep -v '^#' gen/detect/sources.tsv | while IFS=$'\t' read -r lang wiki _ revs; do
+        dir=zig-out/detect/wiki/$lang
+        missing=$(tr , '\n' <<< "$revs" | while read -r r; do [ -f "$dir/$r.wiki" ] || echo "$r"; done)
+        [ -z "$missing" ] && continue
+        mkdir -p zig-out/detect/fetch
+        echo "$missing" | split -l 50 - "zig-out/detect/fetch/$lang."
+        for b in zig-out/detect/fetch/"$lang".??; do
+            curl -sSf --retry 3 -A '{{ detect_ua }}' -o "$b.json" \
+                "https://$wiki.wikipedia.org/{{ detect_api }}&prop=revisions&rvprop=ids|content&rvslots=main&revids=$(paste -sd'|' "$b")"
+            "$bin" unpack "$b.json" "$dir"
+            rm "$b" "$b.json"
+            sleep 1
+        done
+    done
+    (cd zig-out/detect && sha256sum --quiet --strict --check ../../gen/detect/SHA256SUMS)
+    "$bin" build
+
+[doc("Rewrite gen/detect/SHA256SUMS from zig-out/detect/wiki/, after a deliberate change to the corpus")]
+[group("detect")]
+detect-corpus-sums:
+    cd zig-out/detect && grep -v '^#' ../../gen/detect/sources.tsv | while IFS=$'\t' read -r lang _ _ revs; do tr , '\n' <<< "$revs" | sed "s|^|wiki/$lang/|; s|$|.wiki|"; done | xargs sha256sum > ../../gen/detect/SHA256SUMS
+
+[doc("Write src/detect/tables.zig, detection's models, from the corpus's training text (gen/detect/train.zig)")]
+[group("detect")]
+detect-gen: detect-corpus
+    zig build detect-train
+    zig-out/bin/detect-train write
+
+[doc("The committed src/detect/tables.zig is what `just detect-gen` writes from the pinned corpus, which this fetches from Wikipedia on first run")]
+[group("detect")]
+detect-check: detect-corpus
+    zig build detect-train
+    zig-out/bin/detect-train check
+
+# The uchardet arm of the scoring harness.
+[private]
+detect-uchardet:
+    cc -O2 -std=c11 -Wall -Wextra -Werror -o zig-out/detect/detect-uchardet test/detect/uchardet.c $(pkg-config --cflags --libs uchardet)
+
+[doc("Score detection against chardetng and uchardet on the corpus's test samples: accuracy by encoding and size, bytes needed, and accuracy by language into zig-out/detect/report.md, then each arm's speed on whole articles, pinned to CPU")]
+[group("detect")]
+detect-score CPU="3": detect-corpus detect-uchardet
+    #!/usr/bin/env bash
+    set -euo pipefail
+    zig build detect-score -Doptimize=ReleaseFast
+    samples=zig-out/detect/samples.txt
+    g=zig-out/detect/guesses
+    mkdir -p $g
+    zig-out/bin/detect-score guess $samples > $g/zig.txt
+    zig-out/detect/target/release/detect-chardetng guess $samples > $g/chardetng.txt
+    zig-out/detect/detect-uchardet guess $samples > $g/uchardet.txt
+    zig-out/bin/detect-score report $samples zig=$g/zig.txt chardetng=$g/chardetng.txt uchardet=$g/uchardet.txt > zig-out/detect/report.md
+    echo "accuracy: zig-out/detect/report.md"
+    for arm in zig-out/bin/detect-score zig-out/detect/target/release/detect-chardetng zig-out/detect/detect-uchardet; do
+        taskset -c {{ CPU }} $arm bench $samples
+    done
+
+[doc("Score the trainer's variants (gen/detect/train.zig) against each other for decision 5: each one's tables, in bytes, then accuracy and bytes needed into zig-out/detect/variants.md")]
+[group("detect")]
+detect-variants NAMES="hybrid pairs unigram max joint split-latin k256 k1024 k2048 c32 c64 k1024-c64": detect-corpus
+    #!/usr/bin/env bash
+    set -euo pipefail
+    zig build detect-train
+    mkdir -p zig-out/detect/variants zig-out/detect/guesses
+    arms=()
+    for v in {{ NAMES }}; do
+        zig-out/bin/detect-train variant "$v" "zig-out/detect/variants/$v.zig"
+        zig build detect-score -Doptimize=ReleaseFast "-Ddetect-tables=zig-out/detect/variants/$v.zig" -p "zig-out/detect/$v"
+        "zig-out/detect/$v/bin/detect-score" tables "$v"
+        "zig-out/detect/$v/bin/detect-score" guess zig-out/detect/samples.txt > "zig-out/detect/guesses/$v.txt"
+        arms+=("$v=zig-out/detect/guesses/$v.txt")
+    done
+    zig-out/bin/detect-score report zig-out/detect/samples.txt "${arms[@]}" > zig-out/detect/variants.md
+    echo "accuracy: zig-out/detect/variants.md"

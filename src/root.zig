@@ -37,6 +37,11 @@ pub const max_ncr_len = codec.max_ncr_len;
 /// cover each one.
 pub const implemented = @import("codecs.zig").implemented;
 
+/// Charset detection: a guess at the encoding of bytes with no label.
+pub const detect = @import("detect.zig");
+/// The charset detector: feed it bytes, then ask for its guess.
+pub const Detector = detect.Detector;
+
 test {
     std.testing.refAllDecls(@This());
     _ = codec;
@@ -44,4 +49,5 @@ test {
     _ = @import("codecs.zig");
     _ = coder;
     _ = @import("specialized_test.zig");
+    _ = detect;
 }

@@ -1,0 +1,20 @@
+# Detection's groups (test/detect/README.md): encodings that write roughly the
+# same letters, with the languages of gen/detect/sources.tsv trained
+# together. The first encoding is the one training text is fitted to; every
+# encoding gets test samples.
+#group	encodings
+western	windows-1252
+icelandic	windows-1252
+central	windows-1250,ISO-8859-2
+cyrillic	windows-1251,KOI8-U,ISO-8859-5,IBM866
+greek	windows-1253,ISO-8859-7
+turkish	windows-1254
+hebrew	windows-1255,ISO-8859-8
+arabic	windows-1256,ISO-8859-6
+baltic	windows-1257,ISO-8859-4,ISO-8859-13
+vietnamese	windows-1258
+thai	windows-874
+japanese	Shift_JIS,EUC-JP,ISO-2022-JP
+korean	EUC-KR
+simplified	GBK
+traditional	Big5

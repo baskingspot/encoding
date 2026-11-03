@@ -180,4 +180,47 @@ pub fn build(b: *std.Build) void {
     wasm.rdynamic = true;
     b.step("wpt-wasm", "Build zig-out/bin/encoding.wasm for the web-platform-tests harness")
         .dependOn(&b.addInstallArtifact(wasm, .{}).step);
+
+    // Detection's trainer (gen/detect/train.zig), on the host, for `just
+    // detect-gen` and its variants.
+    const detect_train = b.addExecutable(.{
+        .name = "detect-train",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("gen/detect/train.zig"),
+            .target = host,
+            .optimize = .ReleaseSafe,
+            .imports = &.{
+                .{ .name = "index", .module = b.createModule(.{
+                    .root_source_file = b.path("gen/index.zig"),
+                    .target = host,
+                }) },
+                .{ .name = "classes", .module = b.createModule(.{
+                    .root_source_file = b.path("src/detect/classes.zig"),
+                    .target = host,
+                }) },
+            },
+        }),
+    });
+    b.step("detect-train", "Build detection's trainer").dependOn(&b.addInstallArtifact(detect_train, .{}).step);
+
+    // Detection's scoring harness (test/detect/score.zig), for `just
+    // detect-score`, with the committed tables or, with -Ddetect-tables, a
+    // variant's.
+    const variant_tables = b.option(
+        []const u8,
+        "detect-tables",
+        "Tables for the detection scoring harness (default: src/detect/tables.zig)",
+    );
+    const score_mod = b.createModule(.{
+        .root_source_file = b.path("test/detect/score.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "encoding", .module = mod }},
+    });
+    const score_opts = b.addOptions();
+    score_opts.addOption(bool, "variant", variant_tables != null);
+    score_mod.addOptions("score_options", score_opts);
+    if (variant_tables) |p| score_mod.addAnonymousImport("tables", .{ .root_source_file = b.path(p) });
+    const score = b.addExecutable(.{ .name = "detect-score", .root_module = score_mod });
+    b.step("detect-score", "Build the detection scoring harness").dependOn(&b.addInstallArtifact(score, .{}).step);
 }
