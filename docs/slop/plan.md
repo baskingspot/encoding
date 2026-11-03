@@ -314,7 +314,10 @@ not listed, under the same rules as wave 2b and wave 3.
   encodings and 5.3% on UTF-8; EncodingWriter is within 1.5% and 5.8%.
   The reader asks the destination writer for four bytes of room (asking
   for one cost 13-21% on UTF-8), so a fixed writer with 1-3 bytes free
-  fails `stream`.
+  fails `stream`. The owner decided: type-first free functions; the
+  standard's entry points stay option values; fatal mode returns its
+  position on the result; the four-byte room and an `end` that does not
+  flush stay; no UTF-16 adapters until someone asks.
 - **README with numbers** (landed at `142cbea`; readme-numbers-20261103.md):
   `README.md` and `bench/README.md`. On main `a1774d2`: 3.55x encoding_rs
   geomean over its 6,688 rows (3.03x decode, 4.19x encode), 123 below, 44
@@ -326,7 +329,23 @@ not listed, under the same rules as wave 2b and wave 3.
   x86-64-v3 and 90 KB for baseline, through utf's transcoders and their
   dispatch. Shift_JIS and Big5 decode up to 4 KiB is 0.75-0.96x on 27
   rows; an A/B against `d361067` shows no regression, so the earlier "50
-  to 18 rows" was run-to-run spread. Detection unchanged from wave 3.
+  to 18 rows" was run-to-run spread. Detection unchanged from wave 3. The
+  owner decided: the README leads with the host numbers beside a table per
+  CPU level; the 16-byte UTF-8 cost of AVX-512 and x86-64-v3 builds (20.6
+  ns to UTF-16 against 13.6 for baseline) is utf's, raised as
+  baskingspot/utf#1; single-byte size and baseline speed go to wave 5.
+
+Wave 5, one orb. The orchestrating thread owns everything not listed.
+
+- **Single-byte size and baseline speed** (running, branch
+  `wave5-single-byte-size`): `src/single_byte.zig`, `src/codec.zig`, and
+  `src/x_user_defined.zig`, appending to `build.zig`, `justfile`, and
+  `bench/` as needed. A/B a BMP-only transcoder of its own for single-byte
+  staging against `codec.bmpToUtf8` and `codec.encodeStaged`, which call
+  utf, on size and speed for the host, x86-64-v3, baseline, and aarch64
+  builds; then measure an x86-64-v2 build of baseline's non-ASCII
+  single-byte decode and either accept the gap or add a loop for targets
+  without SSSE3.
 
 ## Decisions to measure
 
