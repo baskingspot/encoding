@@ -28,6 +28,8 @@ All notable changes to encoding are recorded here. The format follows
 - The gb18030 and EUC-KR encode tables are 20.7 KB and 5.2 KB smaller in a program that encodes. GBK and gb18030 encode about 11% slower on traditional Chinese text; EUC-KR encodes as fast as before.
 - The single-byte encodings, x-user-defined, UTF-16LE, and UTF-16BE decode and encode 16 bytes at a time: 1.4 to 14 times faster depending on direction, and no longer faster or slower with where the linker places them.
 
+- Single-byte decoding (windows-125x, ISO-8859, KOI8, IBM866, macintosh, ...) is faster on x86-64 without AVX-512 and on aarch64: blocks of 16 bytes are looked up with `pshufb` (SSSE3, AVX2) or NEON `tbl`, chosen at compile time from the target CPU. Single-byte encoding is faster on every target.
+
 ### Fixed
 
 - Decoding UTF-16LE or UTF-16BE with many unpaired surrogates is linear in the input: it was quadratic.
