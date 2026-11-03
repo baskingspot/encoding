@@ -1,0 +1,53 @@
+name: detect
+
+# `just detect-check`: the committed detection tables are what the trainer
+# writes from the pinned Wikipedia corpus. It fetches about 3,400 articles,
+# so it runs weekly, by hand, and when detection's code or corpus changes,
+# not on every push. The unit tests and the fuzz target run in ci.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/detect.zig"
+      - "src/detect/**"
+      - "gen/detect/**"
+      - "test/detect/**"
+      - ".github/workflows/detect.yml"
+  pull_request:
+    paths:
+      - "src/detect.zig"
+      - "src/detect/**"
+      - "gen/detect/**"
+      - "test/detect/**"
+      - ".github/workflows/detect.yml"
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect-check:
+    name: detect-check
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          install_url: https://releases.nixos.org/nix/nix-2.35.3/install
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: baskingspot
+          extraPullNames: mattrobenolt
+          skipPush: true
+      - name: Check the detection tables against the corpus
+        run: nix develop --command just detect-check
