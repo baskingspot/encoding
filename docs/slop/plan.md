@@ -268,7 +268,10 @@ lines it needs to `root.zig`, `build.zig`, `justfile`, `flake.nix`,
   search ends in a mask and a bit scan instead of `std.simd.firstTrue`:
   encode 1.19x and 1.18x on x86-64-v3, 1.28x and 1.18x with AVX-512.
   aarch64 is tested under qemu in CI (`just test-aarch64`); NEON's speed and
-  its patch threshold are not measured.
+  its patch threshold are not measured. The owner decided: keep the XORed
+  split tables (a split that adds no bytes decoded at 0.93x on v3); accept
+  the short all-ASCII cost; keep one two-lane threshold until an aarch64
+  machine measures NEON.
 - **Detection** (landed at `15ecb3b`; detect-20261103.md): `Detector` in
   `src/detect.zig`, its trainer `gen/detect/train.zig`, and the scoring
   harness `test/detect/`. Mean accuracy over 25 encodings at 16 bytes,
@@ -278,7 +281,26 @@ lines it needs to `root.zig`, `build.zig`, `justfile`, `flake.nix`,
   (chardetng 9.8 MB/s); 864 bytes of state. Behind chardetng on short
   windows-1252, short central European, ISO-8859-4 at 16 bytes, and
   ISO-8859-7 against windows-1253. `just detect-check` needs the network,
-  so it is not in `just ci`.
+  so it is not in `just ci`: `.github/workflows/detect.yml` runs it weekly,
+  by hand, and when detection's files change. The owner decided: the
+  trained tables are statistics, not a derivative of the CC BY-SA corpus,
+  which THIRD_PARTY.md attributes; windows-1252 keeps the lowest prior;
+  `DetectorWith` stays public while the API incubates.
+
+Wave 4, two orbs in parallel. The orchestrating thread owns everything
+not listed, under the same rules as wave 2b and wave 3.
+
+- **Conveniences and streams** (running, branch `wave4-io`): new files
+  only, `src/convert.zig` and `src/io.zig` or as it settles: one-call
+  conversions of a whole buffer into a caller's buffer, and a
+  `std.Io.Reader` that decodes a stream to UTF-8 and a `std.Io.Writer` that
+  encodes UTF-8 to a stream, with fuzz targets and per-call measurements.
+  Proposes README text for its API.
+- **README with numbers** (running, branch `wave4-readme`): `README.md`,
+  `bench/README.md`, and its results file. A full benchmark run of main
+  against every arm, table sizes against encoding_rs, and detection
+  against chardetng and uchardet, written up for a person deciding whether
+  to use the package.
 
 ## Decisions to measure
 
