@@ -394,7 +394,11 @@ pub const Encoder = struct {
     inline fn search(e: *const Encoder, cp: u16) u8 {
         const T = @Vector(128, u16);
         const table: T = e.table.*;
-        const i = std.simd.firstTrue(table == @as(T, @splat(cp))) orelse return 0;
+        // A mask and a bit scan: `std.simd.firstTrue` reduces a vector of
+        // lane numbers instead, some forty instructions on AVX2.
+        const bits: u128 = @bitCast(table == @as(T, @splat(cp)));
+        if (bits == 0) return 0;
+        const i = if (codec.native_endian == .little) @ctz(bits) else @clz(bits);
         return 0x80 + @as(u8, i);
     }
 
