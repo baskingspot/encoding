@@ -232,7 +232,7 @@ file.
 - **Compile-time decoders** (landed; comptime-20261102.md, comptime.md):
   `DecoderFor`/`EncoderFor`, now the base of `Decoder` and `Encoder`. A
   windows-1252 decoder links 320 bytes of .rodata and 812 of .text in
-  ReleaseSmall, against 178,212 and 34,047 for `Decoder`. One encoding is
+  ReleaseSmall (1,049 and 5,781 since wave 2's block loops; 51,012 and 12,250 for x86-64-v3, readme-numbers-20261103.md), against 178,212 and 34,047 for `Decoder`. One encoding is
   0.876x `Decoder`'s time per call at 16 bytes and the same at 64 KiB;
   `DecoderFor(&implemented)` is 1.004x and links what `Decoder` links.
 
@@ -315,11 +315,18 @@ not listed, under the same rules as wave 2b and wave 3.
   The reader asks the destination writer for four bytes of room (asking
   for one cost 13-21% on UTF-8), so a fixed writer with 1-3 bytes free
   fails `stream`.
-- **README with numbers** (running, branch `wave4-readme`): `README.md`,
-  `bench/README.md`, and its results file. A full benchmark run of main
-  against every arm, table sizes against encoding_rs, and detection
-  against chardetng and uchardet, written up for a person deciding whether
-  to use the package.
+- **README with numbers** (landed at `142cbea`; readme-numbers-20261103.md):
+  `README.md` and `bench/README.md`. On main `a1774d2`: 3.55x encoding_rs
+  geomean over its 6,688 rows (3.03x decode, 4.19x encode), 123 below, 44
+  of them UTF-8 to UTF-8; ICU 5.20x, glibc iconv 10.29x, GNU libiconv
+  12.83x, x/text 6.55x; 16-byte decode to UTF-8 10.0 ns against 14.2.
+  Built for x86-64-v3 4.73x and baseline 3.38x at 64 KiB (host 6.00x).
+  Tables 307,099 bytes against 124,497. A one-encoding windows-1252
+  `DecoderFor` links 7 KB with AVX-512, 26 KB on aarch64, 63 KB for
+  x86-64-v3 and 90 KB for baseline, through utf's transcoders and their
+  dispatch. Shift_JIS and Big5 decode up to 4 KiB is 0.75-0.96x on 27
+  rows; an A/B against `d361067` shows no regression, so the earlier "50
+  to 18 rows" was run-to-run spread. Detection unchanged from wave 3.
 
 ## Decisions to measure
 
