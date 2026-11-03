@@ -26,14 +26,41 @@ pub fn main(init: std.process.Init) !void {
     const label = if (args.len > 1) args[1] else "latin1";
     switch (variant) {
         .none => try w.writeAll(try whole(r)),
-        .direct_1252 => try w.writeAll(try direct(Win1252.init(.windows_1252, .{ .bom = .remove }), try whole(r))),
-        .convert_1252 => try w.writeAll((try enc.decodeToUtf8(Win1252, .windows_1252, try whole(r), &out_buf, .{ .bom = .remove })).text),
+        .direct_1252 => try w.writeAll(try direct(
+            Win1252.init(.windows_1252, .{ .bom = .remove }),
+            try whole(r),
+        )),
+        .convert_1252 => try w.writeAll((try enc.decodeToUtf8(
+            Win1252,
+            .windows_1252,
+            try whole(r),
+            &out_buf,
+            .{ .bom = .remove },
+        )).text),
         .direct_sjis => try w.writeAll(try direct(Sjis.init(.shift_jis, .{ .bom = .remove }), try whole(r))),
-        .convert_sjis => try w.writeAll((try enc.decodeToUtf8(Sjis, .shift_jis, try whole(r), &out_buf, .{ .bom = .remove })).text),
+        .convert_sjis => try w.writeAll((try enc.decodeToUtf8(
+            Sjis,
+            .shift_jis,
+            try whole(r),
+            &out_buf,
+            .{ .bom = .remove },
+        )).text),
         .direct_enc_sjis => try w.writeAll(try direct(SjisOut.init(.shift_jis, .{}), try whole(r))),
-        .convert_enc_sjis => try w.writeAll((try enc.encodeFromUtf8(SjisOut, .shift_jis, try whole(r), &out_buf, .{})).bytes),
+        .convert_enc_sjis => try w.writeAll((try enc.encodeFromUtf8(
+            SjisOut,
+            .shift_jis,
+            try whole(r),
+            &out_buf,
+            .{},
+        )).bytes),
         .direct_label => try w.writeAll(try direct(enc.Decoder.init(try forLabel(label), .{}), try whole(r))),
-        .convert_label => try w.writeAll((try enc.decodeToUtf8(enc.Decoder, try forLabel(label), try whole(r), &out_buf, .{})).text),
+        .convert_label => try w.writeAll((try enc.decodeToUtf8(
+            enc.Decoder,
+            try forLabel(label),
+            try whole(r),
+            &out_buf,
+            .{},
+        )).text),
         .stream_1252 => try stream(Win1252.init(.windows_1252, .{ .bom = .remove }), r, w),
         .reader_1252 => {
             var dr: enc.DecodingReader(Win1252) = .init(r, .init(.windows_1252, .{ .bom = .remove }), &.{});
@@ -82,7 +109,10 @@ fn whole(r: *std.Io.Reader) ![]const u8 {
 /// One call of `coder`, a decoder or encoder, over all of `src`.
 fn direct(coder: anytype, src: []const u8) ![]const u8 {
     var c = coder;
-    const res = if (@hasDecl(@TypeOf(c), "decodeToUtf8")) c.decodeToUtf8(src, &out_buf, true) else c.encodeFromUtf8(src, &out_buf, true);
+    const res = if (@hasDecl(@TypeOf(c), "decodeToUtf8"))
+        c.decodeToUtf8(src, &out_buf, true)
+    else
+        c.encodeFromUtf8(src, &out_buf, true);
     if (res.status == .output_full) return error.NoSpaceLeft;
     return out_buf[0..res.written];
 }

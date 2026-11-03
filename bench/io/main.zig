@@ -238,12 +238,20 @@ pub fn main(init: std.process.Init) !u8 {
         arm_names = &.{ "direct", "adapter", "adapter64" };
         for ([_]Op{ .decode_utf8, .encode_utf8 }) |op| for (adapter_encodings) |e| for (adapter_sizes) |size| {
             const decode = op == .decode_utf8;
-            const in = try load(gpa, io, e, try std.fmt.allocPrint(gpa, "web-{s}.{s}", .{ size, if (decode) "bin" else "utf8" }), op);
+            const file = try std.fmt.allocPrint(gpa, "web-{s}.{s}", .{ size, if (decode) "bin" else "utf8" });
+            const in = try load(gpa, io, e, file, op);
             try rows.append(gpa, .{
-                .name = try std.fmt.allocPrint(gpa, "{s}/{s}/web-{s}", .{ if (decode) "Reader" else "Writer", e.name(), size }),
+                .name = try std.fmt.allocPrint(
+                    gpa,
+                    "{s}/{s}/web-{s}",
+                    .{ if (decode) "Reader" else "Writer", e.name(), size },
+                ),
                 .enc = e,
                 .in = in,
-                .arms = if (decode) .{ loopDecode, readerDecode, null } else .{ loopEncode, writerEncode, writerEncode64 },
+                .arms = if (decode)
+                    .{ loopDecode, readerDecode, null }
+                else
+                    .{ loopEncode, writerEncode, writerEncode64 },
             });
         };
     } else return 2;
@@ -281,7 +289,11 @@ pub fn main(init: std.process.Init) !u8 {
                 const ns = time(f, row.enc, row.in, out, row.iters);
                 const per: f64 = @as(f64, @floatFromInt(ns)) / @as(f64, @floatFromInt(row.iters));
                 const gbs: f64 = @as(f64, @floatFromInt(row.in.len)) / per;
-                try files[a].print(gpa, "Benchmark{s}\t{d}\t{d:.3} ns/op\t{d:.4} GB/s\n", .{ row.name, row.iters, per, gbs });
+                try files[a].print(
+                    gpa,
+                    "Benchmark{s}\t{d}\t{d:.3} ns/op\t{d:.4} GB/s\n",
+                    .{ row.name, row.iters, per, gbs },
+                );
             }
         }
         std.debug.print("round {d} of {d}\n", .{ round, rounds });

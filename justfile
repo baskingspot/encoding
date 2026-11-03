@@ -2,7 +2,7 @@
 # AGENTS.md holds the working conventions.
 
 markdown := "README.md AGENTS.md CHANGELOG.md THIRD_PARTY.md docs/slop bench/README.md test/detect/README.md .github"
-zig_dirs := "src gen test bench/zig build.zig build.zig.zon bench/build.zig bench/build.zig.zon"
+zig_dirs := "src gen test bench/zig build.zig build.zig.zon bench/build.zig bench/build.zig.zon bench/io/build.zig bench/io/build.zig.zon bench/io/main.zig bench/io/size.zig"
 
 [private]
 default:
