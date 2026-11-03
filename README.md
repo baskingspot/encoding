@@ -101,13 +101,28 @@ var decoder: encoding.Decoder = .init(guess.encoding, .{});
 
 The guess is one of the encodings unlabeled web content used: UTF-8, Shift_JIS, EUC-JP, ISO-2022-JP, EUC-KR, Big5, GBK, windows-874, windows-1250 to -1258, ISO-8859-2, -4, -5, -6, -7, -8, and -13, KOI8-U, and IBM866, with a confidence from 0 to 1; `guesses` ranks them all. The hints, a top-level domain or a declared language (`.language = "ru"`), settle short or ambiguous input, and `.allow_utf8 = false` keeps UTF-8 out. UTF-16 is found by its byte order mark, with `Encoding.forBom`, before detection. The detector keeps 864 bytes of state and none of the input.
 
-<!-- one-call conversions and std.Io adapters: filled in from the wave4-io branch -->
-
 ### Convert a whole buffer, or a stream
 
-To be written: the one-call conversions and the `std.Io.Reader` and `std.Io.Writer` adapters.
+```zig
+// A whole buffer in one call. The first argument is the decoder type:
+// `Decoder` takes any encoding, `DecoderFor(&.{.shift_jis})` links only Shift_JIS.
+const r = try encoding.decodeToUtf8(encoding.Decoder, enc, bytes, &out, .{});
+// r.text is the UTF-8; r.encoding the encoding decoded, which a byte order mark can change.
 
-<!-- end of the one-call conversions and std.Io adapters -->
+// Streams: decode what a reader reads...
+var dr: encoding.DecodingReader(encoding.Decoder) = .init(in, .init(enc, .{}), &.{});
+_ = try dr.interface.streamRemaining(out_writer);
+
+// ...or encode what you write.
+var ew: encoding.EncodingWriter(encoding.Encoder) = .init(out_writer, .init(.shift_jis, .{}), &buf);
+try ew.interface.print("{s}\n", .{text});
+try ew.end();
+try out_writer.flush();
+```
+
+`decodeToUtf8`, `decodeToUtf16`, `encodeFromUtf8`, and `encodeFromUtf16` convert all of their input or fail with `error.NoSpaceLeft`; a buffer of the type's `maxUtf8Len` (or `maxUtf16Len`, `maxLenFromUtf8`, `maxLenFromUtf16`) always fits. In fatal mode the result also carries the first error and where it is in the input, in `malformed` or `unmappable`. They cost the same as calling a decoder or encoder yourself.
+
+`DecodingReader` is a `std.Io.Reader` of UTF-8 over another reader's bytes, and `EncodingWriter` a `std.Io.Writer` that encodes the UTF-8 written to it onto another writer. Both work over buffers you give them, of any size. A fatal error ends a read or write with `ReadFailed` or `WriteFailed`, and its position from the start of the stream is in `malformed` or `unmappable`. `end` finishes an `EncodingWriter`'s stream (a cut-off character, ISO-2022-JP's return to ASCII) but does not flush the writer under it.
 
 ## Correctness
 
