@@ -53,8 +53,17 @@ Inc.
   articles' contributors, and generates the benchmark inputs from them into
   the gitignored `bench/corpus-gen/`. `bench/corpus/SHA256SUMS` pins the
   fetched and generated files.
-- The test and benchmark programs depend on encoding_rs (MIT or Apache-2.0)
-  and unicode-normalization (MIT or Apache-2.0) through Cargo, on
-  golang.org/x/text (BSD 3-Clause) through Go modules, and on ICU, glibc's
-  iconv, and GNU libiconv from the Nix dev shell. None of them is part of
+- `just detect-corpus` fetches 3,360 Wikipedia articles at fixed revisions
+  (`gen/detect/sources.tsv`), under
+  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) by the
+  articles' contributors, into the gitignored `zig-out/detect/`;
+  `gen/detect/SHA256SUMS` pins them. The detector's models,
+  `src/detect/tables.zig`, are statistics `gen/detect/train.zig` computes
+  from that text: costs of character classes, class pairs, and the most
+  frequent CJK characters. They contain no text from it.
+- The test and benchmark programs depend on encoding_rs, chardetng,
+  unicode-normalization, and serde_json (each MIT or Apache-2.0) through
+  Cargo, on golang.org/x/text (BSD 3-Clause) through Go modules, and on
+  ICU, glibc's iconv, GNU libiconv, and uchardet (MPL-1.1, GPL-2.0+, or
+  LGPL-2.1+) from the Nix dev shell. None of them is part of
   the package.
