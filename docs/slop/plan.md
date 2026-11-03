@@ -82,7 +82,11 @@ every buffer.
   contract behind both.
 - One-call conveniences over a whole buffer into a caller's buffer, and a
   `std.Io.Reader`/`std.Io.Writer` adapter that transcodes a stream.
-- `detect`: a `Detector` fed chunks, then asked for its guess.
+- `detect`: a `Detector` fed chunks with `feed`, then asked for `guess` or
+  a ranked `guesses`, with `Hints` (top-level domain, declared language,
+  whether UTF-8 may be guessed). Candidates are chardetng's set; UTF-16 is
+  left to `Encoding.forBom`. `DetectorWith(tables)` is public for the
+  scoring harness while the API incubates.
 
 ## Dependencies
 
@@ -257,10 +261,16 @@ lines it needs to `root.zig`, `build.zig`, `justfile`, `flake.nix`,
   `src/single_byte.zig` and `src/codec.zig`. The single-byte block lookup
   for x86-64 without AVX-512 (SSSE3 `pshufb`, AVX2) and for aarch64 (NEON
   `tbl`), and an aarch64 test job under qemu.
-- **Detection** (running, branch `wave3-detect`): new files only,
-  `src/detect.zig` or `src/detect/`, its tables and generator, its fuzz
-  target, and a scoring harness against chardetng and uchardet. Settles
-  decision 5.
+- **Detection** (landed at `15ecb3b`; detect-20261103.md): `Detector` in
+  `src/detect.zig`, its trainer `gen/detect/train.zig`, and the scoring
+  harness `test/detect/`. Mean accuracy over 25 encodings at 16 bytes,
+  32 bytes, and on whole articles is 92.0, 95.3, and 99.7%, against
+  chardetng's 88.9, 93.0, and 98.6% and uchardet's 81.1, 91.4, and 92.5%.
+  Tables are 32.3 KB (chardetng 29.3 KB); whole articles run at 61.2 MB/s
+  (chardetng 9.8 MB/s); 864 bytes of state. Behind chardetng on short
+  windows-1252, short central European, ISO-8859-4 at 16 bytes, and
+  ISO-8859-7 against windows-1253. `just detect-check` needs the network,
+  so it is not in `just ci`.
 
 ## Decisions to measure
 
@@ -335,3 +345,10 @@ lines it needs to `root.zig`, `build.zig`, `justfile`, `flake.nix`,
 5. **Detection's model.** chardetng's approach (byte-pair scores per
    encoding and language, from a training corpus) against simpler
    frequency models, on accuracy, bytes needed, and table size.
+   **Decided** (detect-20261103.md): byte-pair scores. A Markov chain over
+   character classes per language group, plus each language's class
+   frequencies, with the languages mixed as probabilities. It beats a
+   frequency-only model by 9 points at 16 bytes and chardetng's
+   most-favorable-language merge by 2.4. With 512 listed CJK characters and
+   48 classes per group, the tables are 32.3 KB. windows-1252 keeps the
+   lowest prior, since it is the commonest unlabeled encoding.
