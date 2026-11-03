@@ -366,11 +366,19 @@ detect-corpus: detect-build
         mkdir -p zig-out/detect/fetch
         echo "$missing" | split -l 50 - "zig-out/detect/fetch/$lang."
         for b in zig-out/detect/fetch/"$lang".??; do
-            curl -sSf --retry 3 -A '{{ detect_ua }}' -o "$b.json" \
-                "https://$wiki.wikipedia.org/{{ detect_api }}&prop=revisions&rvprop=ids|content&rvslots=main&revids=$(paste -sd'|' "$b")"
-            "$bin" unpack "$b.json" "$dir"
+            # The API can answer 200 without some revisions' content, so
+            # fetch the batch again until every revision is on disk.
+            for attempt in 1 2 3 4 5; do
+                curl -sSf --retry 3 -A '{{ detect_ua }}' -o "$b.json" \
+                    "https://$wiki.wikipedia.org/{{ detect_api }}&prop=revisions&rvprop=ids|content&rvslots=main&revids=$(paste -sd'|' "$b")"
+                "$bin" unpack "$b.json" "$dir" || true
+                sleep "$attempt"
+                complete=yes
+                while read -r r; do [ -f "$dir/$r.wiki" ] || complete=no; done < "$b"
+                [ "$complete" = yes ] && break
+                [ "$attempt" = 5 ] && { echo "$lang: revisions missing after 5 fetches: $b" >&2; exit 1; }
+            done
             rm "$b" "$b.json"
-            sleep 1
         done
     done
     (cd zig-out/detect && sha256sum --quiet --strict --check ../../gen/detect/SHA256SUMS)
