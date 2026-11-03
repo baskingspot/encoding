@@ -11,9 +11,11 @@
 //! not hinge on where the linker places them
 //! (docs/slop/results/single-byte-20261102.md). Decoding copies ASCII
 //! blocks (widened for UTF-16), two blocks a step once one is ASCII, and
-//! looks up any other block whole: with AVX-512BW's `vpermi2w`, or lane by
-//! lane without it. To UTF-8, those blocks go to UTF-16 first, up to
-//! `codec.stage_len` bytes, which utf transcodes.
+//! looks up any other block whole: with AVX-512BW's `vpermi2w`, with
+//! `pshufb` (SSSE3, AVX2) or NEON's `tbl` where it holds more than two
+//! bytes from 0x80, or lane by lane (docs/slop/results/simd-portable-20261103.md).
+//! To UTF-8, those blocks go to UTF-16 first, up to `codec.stage_len`
+//! bytes, which utf transcodes.
 //!
 //! The encoder has no reverse table: a code point in the table's longest
 //! run of consecutive code points (in a block, also its second longest)
@@ -33,6 +35,9 @@ const EncodeResult = codec.EncodeResult;
 const block = codec.ascii_block;
 const V = @Vector(block, u8);
 const W = @Vector(block, u16);
+/// Two blocks of bytes: AVX2's `vpshufb` looks up the low and the high
+/// bytes of a block's code points at once.
+const Y = @Vector(2 * block, u8);
 
 pub const encodings = [_]Encoding{
     .ibm866,       .iso_8859_2,   .iso_8859_3,     .iso_8859_4,   .iso_8859_5,
@@ -46,11 +51,8 @@ pub const encodings = [_]Encoding{
 pub const Table = [128]u16;
 
 /// `e`'s table: the code point of each byte from 0x80, 0 for none.
-pub fn tableOf(e: Encoding) *const Table {
-    inline for (encodings) |t| {
-        if (e == t) return &@field(tables, @tagName(if (t == .iso_8859_8_i) .iso_8859_8 else t));
-    }
-    unreachable;
+fn tableOf(comptime e: Encoding) *const Table {
+    return &@field(tables, @tagName(if (e == .iso_8859_8_i) .iso_8859_8 else e));
 }
 
 /// A run of bytes whose code points go up by one with each byte, which
@@ -89,18 +91,15 @@ fn longestRuns(comptime table: *const Table) [2]Run {
     return best;
 }
 
-fn runsOf(e: Encoding) [2]Run {
-    inline for (encodings) |t| {
-        if (e == t) return comptime longestRuns(tableOf(t));
-    }
-    unreachable;
-}
-
 pub const Decoder = struct {
     table: *const Table,
+    planes: PlanesPtr,
 
     pub fn init(e: Encoding) Decoder {
-        return .{ .table = tableOf(e) };
+        inline for (encodings) |t| {
+            if (e == t) return .{ .table = tableOf(t), .planes = planesOf(t) };
+        }
+        unreachable;
     }
 
     pub fn decode(
@@ -123,7 +122,7 @@ pub const Decoder = struct {
                 i += a;
                 o += a;
                 if (a != 0) continue;
-                const k = decodeBlock(table, src[i..][0..block], dst[o..][0..block], mode);
+                const k = decodeBlock(table, d.planes, src[i..][0..block], dst[o..][0..block], mode);
                 if (k != block) return .{ .status = .malformed, .read = i + k + 1, .written = o + k };
                 i += block;
                 o += block;
@@ -140,7 +139,7 @@ pub const Decoder = struct {
                 const n = @min(stage.len, (src.len - i) / block * block);
                 var len: usize = 0;
                 while (len < n) : (len += block) {
-                    const k = decodeBlock(table, src[i + len ..][0..block], stage[len..][0..block], mode);
+                    const k = decodeBlock(table, d.planes, src[i + len ..][0..block], stage[len..][0..block], mode);
                     if (k != block) {
                         len += k;
                         break;
@@ -184,14 +183,23 @@ pub const Decoder = struct {
 /// Decodes the block at `s` to UTF-16 at `d`, one unit per byte, and
 /// returns `block`; in fatal mode, at a byte with no code point, returns
 /// its lane instead, with the units before it written.
-inline fn decodeBlock(table: *const Table, s: *const [block]u8, d: *[block]u16, mode: codec.DecoderMode) usize {
+inline fn decodeBlock(
+    table: *const Table,
+    planes: PlanesPtr,
+    s: *const [block]u8,
+    d: *[block]u16,
+    mode: codec.DecoderMode,
+) usize {
     const v: V = s.*;
     const wide: W = v;
     const high = v >= @as(V, @splat(0x80));
-    if (vector_lookup) {
+    var m = codec.highBits(high);
+    // The byte shuffles cost more than patching a lane or two, as in
+    // Latin text with the odd accented letter; `vpermi2w` does not.
+    if (block_lookup != .none and (block_lookup == .avx512 or @popCount(m) > 2)) {
         // Every lane looked up, no branch on the bytes: ASCII lanes take
         // their byte, the rest their table entry.
-        const cps = lookup(table, v);
+        const cps = lookupBlock(table, planes, v);
         var out = @select(u16, high, cps, wide);
         const bad = @select(bool, high, cps == @as(W, @splat(0)), @as(@Vector(block, bool), @splat(false)));
         const bad_bits = codec.highBits(bad);
@@ -207,7 +215,6 @@ inline fn decodeBlock(table: *const Table, s: *const [block]u8, d: *[block]u16, 
     }
     // The ASCII lanes widened, then the others one by one.
     d.* = wide;
-    var m = codec.highBits(high);
     while (m != 0) : (m &= m - 1) {
         const k = @ctz(m);
         var c = table[s[k] - 0x80];
@@ -220,20 +227,133 @@ inline fn decodeBlock(table: *const Table, s: *const [block]u8, d: *[block]u16, 
     return block;
 }
 
-/// Whether `lookup` is a vector permute: AVX-512BW's `vpermi2w`, under the
-/// LLVM backend, which the intrinsic needs.
-const vector_lookup = builtin.zig_backend == .stage2_llvm and builtin.cpu.arch == .x86_64 and
-    std.Target.x86.featureSetHas(builtin.cpu.features, .avx512bw);
+/// How `lookupBlock` looks a block up, chosen at compile time from the
+/// target's features: AVX-512BW's `vpermi2w` over the table; `pshufb`
+/// (SSSE3, or AVX2's on the low and high bytes at once) or NEON's `tbl`
+/// over `Planes`; or `none`, lane by lane. The intrinsics need the LLVM
+/// backend.
+const Lookup = enum { avx512, avx2, ssse3, neon, none };
+
+const block_lookup: Lookup = blk: {
+    if (builtin.zig_backend != .stage2_llvm) break :blk .none;
+    const f = builtin.cpu.features;
+    break :blk switch (builtin.cpu.arch) {
+        .x86_64 => if (std.Target.x86.featureSetHas(f, .avx512bw))
+            .avx512
+        else if (std.Target.x86.featureSetHas(f, .avx2))
+            .avx2
+        else if (std.Target.x86.featureSetHas(f, .ssse3))
+            .ssse3
+        else
+            .none,
+        .aarch64 => if (std.Target.aarch64.featureSetHas(f, .neon)) .neon else .none,
+        else => .none,
+    };
+};
+
+/// A table's code points split into their low and high bytes, for the byte
+/// shuffles: entry `16 * k + j` is in `[k][0][j]` (low byte) and
+/// `[k][1][j]` (high byte). For `pshufb`, each chunk of 16 but the first
+/// is XORed with the one before it (`lookupBlock`). 256 bytes for each
+/// encoding beside its table, on the targets that use them.
+const Planes = [8][2]V;
+
+const uses_planes = block_lookup != .avx512 and block_lookup != .none;
+const PlanesPtr = if (uses_planes) *const Planes else void;
+
+fn planesOf(comptime e: Encoding) PlanesPtr {
+    if (!uses_planes) return {};
+    return &struct {
+        const p = blk: {
+            @setEvalBranchQuota(10_000);
+            const table = tableOf(e);
+            var out: Planes = undefined;
+            for (&out, 0..) |*o, k| {
+                for (0..block) |j| {
+                    var c = table[16 * k + j];
+                    if (block_lookup != .neon and k > 0) c ^= table[16 * (k - 1) + j];
+                    o[0][j] = @truncate(c);
+                    o[1][j] = @intCast(c >> 8);
+                }
+            }
+            break :blk out;
+        };
+    }.p;
+}
 
 extern fn @"llvm.x86.avx512.vpermi2var.hi.512"(
     @Vector(32, u16),
     @Vector(32, u16),
     @Vector(32, u16),
 ) callconv(.{ .x86_64_sysv = .{} }) @Vector(32, u16);
+extern fn @"llvm.x86.ssse3.pshuf.b.128"(V, V) callconv(.{ .x86_64_sysv = .{} }) V;
+extern fn @"llvm.x86.avx2.pshuf.b"(Y, Y) callconv(.{ .x86_64_sysv = .{} }) Y;
+extern fn @"llvm.aarch64.neon.tbl4.v16i8"(V, V, V, V, V) callconv(.c) V;
+extern fn @"llvm.aarch64.neon.tbx4.v16i8"(V, V, V, V, V, V) callconv(.c) V;
+
+/// `table[b & 0x7F]` for each lane's byte `b` from 0x80; the other lanes
+/// are the caller's to replace.
+inline fn lookupBlock(table: *const Table, planes: PlanesPtr, v: V) W {
+    switch (block_lookup) {
+        .avx512 => return permuteBlock(table, v),
+        // `pshufb` gives the entry of the low four bits, or 0 where bit 7
+        // is set. Less 0x80 and then 16 more for each chunk, a byte has
+        // bit 7 clear in chunks 0 to its own, whose lookups XOR to its
+        // entry.
+        .avx2 => {
+            const shuffle = @"llvm.x86.avx2.pshuf.b";
+            // The block in both halves, for the low and the high bytes.
+            const both = std.simd.iota(i32, 2 * block) % @as(@Vector(2 * block, i32), @splat(block));
+            var idx: Y = @shuffle(u8, v ^ @as(V, @splat(0x80)), undefined, both);
+            var r: Y = @splat(0);
+            inline for (planes) |p| {
+                r ^= shuffle(@bitCast(p), idx);
+                idx -%= @splat(16);
+            }
+            const halves: [2]V = @bitCast(r);
+            return join(halves[0], halves[1]);
+        },
+        .ssse3 => {
+            const shuffle = @"llvm.x86.ssse3.pshuf.b.128";
+            var idx = v ^ @as(V, @splat(0x80));
+            var lo: V = @splat(0);
+            var hi: V = @splat(0);
+            inline for (planes) |p| {
+                lo ^= shuffle(p[0], idx);
+                hi ^= shuffle(p[1], idx);
+                idx -%= @splat(16);
+            }
+            return join(lo, hi);
+        },
+        // `tbl` looks up 64 entries and gives 0 past them, `tbx` keeps the
+        // lane there: bytes from 0x80 less 0x80, then less 0xC0.
+        .neon => {
+            const tbl = @"llvm.aarch64.neon.tbl4.v16i8";
+            const tbx = @"llvm.aarch64.neon.tbx4.v16i8";
+            const a = v -% @as(V, @splat(0x80));
+            const b = v -% @as(V, @splat(0xC0));
+            const p = planes;
+            const lo = tbx(tbl(p[0][0], p[1][0], p[2][0], p[3][0], a), p[4][0], p[5][0], p[6][0], p[7][0], b);
+            const hi = tbx(tbl(p[0][1], p[1][1], p[2][1], p[3][1], a), p[4][1], p[5][1], p[6][1], p[7][1], b);
+            return join(lo, hi);
+        },
+        .none => unreachable,
+    }
+}
+
+/// Code units from their low and high bytes.
+inline fn join(lo: V, hi: V) W {
+    const interleave = comptime blk: {
+        var m: [2 * block]i32 = undefined;
+        for (0..block) |j| m[2 * j ..][0..2].* = .{ j, ~@as(i32, j) };
+        break :blk m;
+    };
+    return @bitCast(@as(@Vector(2 * block, u8), @shuffle(u8, lo, hi, interleave)));
+}
 
 /// `table[b & 0x7F]` for each lane's byte `b`: two two-register permutes,
 /// each over 64 entries, and bit 6 picks between them.
-inline fn lookup(table: *const Table, v: V) W {
+inline fn permuteBlock(table: *const Table, v: V) W {
     const permute = @"llvm.x86.avx512.vpermi2var.hi.512";
     const t: [4]@Vector(32, u16) = @bitCast(table.*);
     const wide: W = v;
@@ -250,8 +370,13 @@ pub const Encoder = struct {
     run2: Run,
 
     pub fn init(e: Encoding) Encoder {
-        const runs = runsOf(e);
-        return .{ .table = tableOf(e), .run = runs[0], .run2 = runs[1] };
+        inline for (encodings) |t| {
+            if (e == t) {
+                const runs = comptime longestRuns(tableOf(t));
+                return .{ .table = tableOf(t), .run = runs[0], .run2 = runs[1] };
+            }
+        }
+        unreachable;
     }
 
     /// The byte for `cp`, a non-ASCII scalar value, or 0 for none. The
@@ -471,4 +596,34 @@ test "a whole block: NUL stays NUL, an unmapped byte is U+FFFD or the error's la
     var back: [32]u8 = undefined;
     const w = e.encode(u16, &want, &back, true, .fatal);
     try testing.expectEqual(EncodeResult{ .status = .unmappable, .read = 14, .written = 13, .unmappable = 0xFFFD }, w);
+}
+
+test "every table entry at every lane of a block, both modes" {
+    // The 128 bytes from 0x80, rotated so that each comes at each lane of
+    // a block, against the table: what `lookupBlock` and the lane-by-lane
+    // patch must both give.
+    inline for (encodings) |e| {
+        const table = tableOf(e);
+        var d = Decoder.init(e);
+        for (0..block) |r| {
+            var src: [128]u8 = undefined;
+            for (&src, 0..) |*b, i| b.* = @intCast(0x80 + (i + r) % 128);
+            var out: [128]u16 = undefined;
+            const res = d.decode(u16, &src, &out, true, .replacement);
+            try testing.expectEqual(DecodeResult{ .status = .input_empty, .read = 128, .written = 128 }, res);
+            for (src, out) |b, u| {
+                const c = table[b - 0x80];
+                try testing.expectEqual(if (c == 0) 0xFFFD else c, u);
+            }
+            const hole = for (src, 0..) |b, i| {
+                if (table[b - 0x80] == 0) break i;
+            } else null;
+            const f = d.decode(u16, &src, &out, true, .fatal);
+            if (hole) |i| {
+                try testing.expectEqual(DecodeResult{ .status = .malformed, .read = i + 1, .written = i }, f);
+            } else {
+                try testing.expectEqual(res, f);
+            }
+        }
+    }
 }
