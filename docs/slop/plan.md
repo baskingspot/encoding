@@ -257,10 +257,18 @@ everything not listed, including `coder.zig`, `codecs.zig`, `encoding.zig`,
 lines it needs to `root.zig`, `build.zig`, `justfile`, `flake.nix`,
 `test/fuzz/main.zig`, and `.github/workflows/ci.yml`, and proposes everything else in its report.
 
-- **Portable SIMD** (running, branch `wave2b-simd-portable`):
-  `src/single_byte.zig` and `src/codec.zig`. The single-byte block lookup
-  for x86-64 without AVX-512 (SSSE3 `pshufb`, AVX2) and for aarch64 (NEON
-  `tbl`), and an aarch64 test job under qemu.
+- **Portable SIMD** (landed at `7d7d3eb`; simd-portable-20261103.md):
+  single-byte decode looks a block with more than two bytes from 0x80 up
+  with `pshufb` (SSSE3, AVX2) or NEON `tbl` over the table split into low
+  and high bytes, each chunk of 16 XORed with the one before (256 bytes per
+  encoding on those targets, none with AVX-512 or on the baseline); fewer
+  are patched lane by lane. x86-64-v3 decode 1.26x (to UTF-16) and 1.19x (to
+  UTF-8), 71% and 81% of the AVX-512 build; short all-ASCII calls to UTF-16
+  pay 2-3 ns, accepted and open as a follow-up. The encoder's 128-entry
+  search ends in a mask and a bit scan instead of `std.simd.firstTrue`:
+  encode 1.19x and 1.18x on x86-64-v3, 1.28x and 1.18x with AVX-512.
+  aarch64 is tested under qemu in CI (`just test-aarch64`); NEON's speed and
+  its patch threshold are not measured.
 - **Detection** (landed at `15ecb3b`; detect-20261103.md): `Detector` in
   `src/detect.zig`, its trainer `gen/detect/train.zig`, and the scoring
   harness `test/detect/`. Mean accuracy over 25 encodings at 16 bytes,
