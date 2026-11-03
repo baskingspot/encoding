@@ -18,6 +18,8 @@ All notable changes to encoding are recorded here. The format follows
 - `DecoderFor(encodings)` and `EncoderFor(encodings)`: a decoder or encoder for a set of encodings fixed at compile time, which links only those encodings' code and tables (a windows-1252 decoder adds about 1 KB instead of about 210 KB). `Decoder` is now `DecoderFor(&implemented)` and `Encoder` `EncoderFor(&implemented)`, with the same calls. A set without `bom_encodings` takes `OptionsWithoutSniff`, which has no `.sniff`.
 
 - `Detector` (`encoding.detect`): charset detection for unlabeled bytes, as Firefox's chardetng does. Feed it chunks, then call `guess` or `guesses` for a confidence-ranked answer among UTF-8, the CJK encodings, and the single-byte encodings legacy web pages used. It takes optional `Hints`: `tld`, `language`, and `allow_utf8`. It allocates nothing and keeps 864 bytes of state.
+- `decodeToUtf8`, `decodeToUtf16`, `encodeFromUtf8`, and `encodeFromUtf16`: convert a whole buffer into one you own in a single call. Pass the decoder or encoder type first (`Decoder`, or a `DecoderFor` to link only its encodings). You get back `Decoded` or `Encoded`, which in fatal mode also carry the first error and its position, or `error.NoSpaceLeft`. A buffer of the type's `maxUtf8Len` (or `maxUtf16Len`, `maxLenFromUtf8`, `maxLenFromUtf16`) always fits.
+- `DecodingReader(D)` and `EncodingWriter(E)`: a `std.Io.Reader` that decodes another reader's bytes to UTF-8, and a `std.Io.Writer` that encodes the UTF-8 written to it onto another writer, over buffers you give them. Call `end` to finish an `EncodingWriter`'s stream; it does not flush the underlying writer.
 
 ### Changed
 
