@@ -128,6 +128,20 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{.{ .name = "encoding", .module = mod }},
     });
+    // The stream adapters against one-call decoding and encoding
+    // (test/adapters.zig), a test and a fuzz target.
+    const adapters = b.createModule(.{
+        .root_source_file = b.path("test/adapters.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "encoding", .module = mod },
+            .{ .name = "props", .module = props },
+        },
+    });
+    const adapters_tests = b.addRunArtifact(b.addTest(.{ .root_module = adapters, .test_runner = runner }));
+    adapters_tests.addArg(seed);
+    test_step.dependOn(&adapters_tests.step);
     const fuzz = b.addExecutable(.{
         .name = "fuzz",
         .root_module = b.createModule(.{
@@ -137,6 +151,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "encoding", .module = mod },
                 .{ .name = "props", .module = props },
+                .{ .name = "adapters", .module = adapters },
             },
         }),
     });

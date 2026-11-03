@@ -3,13 +3,18 @@
 //! for the properties in test/props.zig (no crash or safety panic, output
 //! well-formed, the same output for any split of the input and any output
 //! buffer, UTF-8 and UTF-16 in agreement, max lengths sufficient), and the
-//! charset detector on arbitrary bytes and hints (`checkDetector`).
+//! charset detector on arbitrary bytes and hints (`checkDetector`), and the
+//! stream adapters (test/adapters.zig): `DecodingReader` on decoder inputs
+//! and `EncodingWriter` on UTF-8, read and written in random pieces, against
+//! one call.
 //!
-//!     fuzz run [--seconds N] [--seed N] [--target decode|encode|detect|all]
+//!     fuzz run [--seconds N] [--seed N] [--target decode|encode|detect|reader|writer|all]
 //!              [--encoding NAME|all] [--out DIR]
 //!     fuzz repro decode NAME FILE
 //!     fuzz repro encode NAME FILE.utf8 FILE.utf16
 //!     fuzz repro detect NAME FILE
+//!     fuzz repro reader NAME FILE
+//!     fuzz repro writer NAME FILE.utf8
 //!
 //! Inputs run in a forked child that copies each one to shared memory
 //! before running it, so a crash, a safety panic, a hang, or a failed
@@ -21,17 +26,18 @@
 const std = @import("std");
 const encoding = @import("encoding");
 const props = @import("props");
+const adapters = @import("adapters");
 const Encoding = encoding.Encoding;
 const linux = std.os.linux;
 
 const max_input = 1 << 16;
 
-const Target = enum { decode, encode, detect };
+const Target = enum { decode, encode, detect, reader, writer };
 
 const Options = struct {
     seconds: u64 = 60,
     seed: ?u64 = null,
-    targets: []const Target = &.{ .decode, .encode, .detect },
+    targets: []const Target = &.{ .decode, .encode, .detect, .reader, .writer },
     encodings: []const Encoding = &encoding.implemented,
     out: []const u8 = "zig-out/fuzz",
 };
@@ -40,10 +46,13 @@ var io: std.Io = undefined;
 const gpa = std.heap.smp_allocator;
 
 const usage =
-    \\usage: fuzz run [--seconds N] [--seed N] [--target decode|encode|detect|all] [--encoding NAME|all] [--out DIR]
+    \\usage: fuzz run [--seconds N] [--seed N] [--target decode|encode|detect|reader|writer|all]
+    \\                [--encoding NAME|all] [--out DIR]
     \\       fuzz repro decode NAME FILE
     \\       fuzz repro encode NAME FILE.utf8 FILE.utf16
     \\       fuzz repro detect NAME FILE
+    \\       fuzz repro reader NAME FILE
+    \\       fuzz repro writer NAME FILE.utf8
     \\
 ;
 
@@ -176,7 +185,7 @@ fn decoderInput(rng: std.Random, corpus: []const []const u8) ![]u8 {
 
 fn runOne(rng: std.Random, target: Target, enc: Encoding, shared: ?*Shared, corpus: []const []const u8) !void {
     switch (target) {
-        .decode => {
+        .decode, .reader => {
             const src = try decoderInput(rng, corpus);
             defer gpa.free(src);
             if (shared) |s| {
@@ -185,9 +194,10 @@ fn runOne(rng: std.Random, target: Target, enc: Encoding, shared: ?*Shared, corp
                 s.len8 = @intCast(n);
                 _ = @atomicRmw(u64, &s.heartbeat, .Add, 1, .seq_cst);
             }
+            if (target == .reader) return adapters.checkReader(gpa, rng, enc, src, adapters.decoderOptions(rng));
             try props.checkDecoder(gpa, rng, enc, src, .{});
         },
-        .encode => {
+        .encode, .writer => {
             const t = try props.encoderInput(gpa, rng, 600);
             defer gpa.free(t.utf8);
             defer gpa.free(t.utf16);
@@ -200,6 +210,7 @@ fn runOne(rng: std.Random, target: Target, enc: Encoding, shared: ?*Shared, corp
                 s.len16 = @intCast(n16);
                 _ = @atomicRmw(u64, &s.heartbeat, .Add, 1, .seq_cst);
             }
+            if (target == .writer) return adapters.checkWriter(gpa, rng, enc, t.utf8, adapters.encoderOptions(rng));
             try props.checkEncoder(gpa, rng, enc, t.utf8, t.utf16, .{});
         },
         .detect => {
@@ -389,11 +400,11 @@ fn record(opts: Options, shared: *Shared, status: Status, log_path: [:0]const u8
             try cwd.writeFile(io, .{ .sub_path = try std.fmt.allocPrint(gpa, "{s}.min", .{base}), .data = min });
             std.debug.print("  input {d} bytes, minimized to {d}: {s}.min\n", .{ data8.len, min.len, base });
         },
-        .detect => {
+        .detect, .reader => {
             try cwd.writeFile(io, .{ .sub_path = try std.fmt.allocPrint(gpa, "{s}.input", .{base}), .data = data8 });
             std.debug.print("  input: {s}.input\n", .{base});
         },
-        .encode => {
+        .encode, .writer => {
             try cwd.writeFile(io, .{ .sub_path = try std.fmt.allocPrint(gpa, "{s}.utf8", .{base}), .data = data8 });
             const data16 = std.mem.sliceAsBytes(shared.data16[0..shared.len16]);
             try cwd.writeFile(io, .{ .sub_path = try std.fmt.allocPrint(gpa, "{s}.utf16", .{base}), .data = data16 });
@@ -456,6 +467,21 @@ fn repro(args: []const [:0]const u8) !u8 {
         .detect => {
             const data = try cwd.readFileAlloc(io, args[2], gpa, .limited(max_input));
             checkDetector(prng.random(), data) catch return 1;
+        },
+        // The reads, writes, and options are random: try many.
+        .reader => {
+            const data = try cwd.readFileAlloc(io, args[2], gpa, .limited(max_input));
+            for (0..1000) |_| {
+                const rng = prng.random();
+                adapters.checkReader(gpa, rng, enc, data, adapters.decoderOptions(rng)) catch return 1;
+            }
+        },
+        .writer => {
+            const t8 = try cwd.readFileAlloc(io, args[2], gpa, .limited(max_input));
+            for (0..1000) |_| {
+                const rng = prng.random();
+                adapters.checkWriter(gpa, rng, enc, t8, adapters.encoderOptions(rng)) catch return 1;
+            }
         },
     }
     std.debug.print("ok\n", .{});

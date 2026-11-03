@@ -49,6 +49,9 @@ pub const encodeFromUtf8 = convert.encodeFromUtf8;
 pub const encodeFromUtf16 = convert.encodeFromUtf16;
 pub const Decoded = convert.Decoded;
 pub const Encoded = convert.Encoded;
+const io = @import("io.zig");
+pub const DecodingReader = io.DecodingReader;
+pub const EncodingWriter = io.EncodingWriter;
 
 test {
     std.testing.refAllDecls(@This());
@@ -59,4 +62,5 @@ test {
     _ = @import("specialized_test.zig");
     _ = detect;
     _ = convert;
+    _ = io;
 }
