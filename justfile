@@ -175,7 +175,7 @@ bench-compare ROUNDS="10" *FILTER: bench-corpus bench-build
     fi
     filter=("${@:2}")
     pattern=$(IFS='|'; echo "${filter[*]:-.}")
-    grep -v '^#' "$out/check-zig.txt" | cut -f1 | grep -E "$pattern" > "$out/rows.list" || true
+    grep -v '^#' "$out/check-zig.txt" | cut -f1 | grep -E -e "$pattern" > "$out/rows.list" || true
     [ -s "$out/rows.list" ] || { echo "no rows match $pattern"; exit 1; }
     declare -A has
     : > "$out/checks.txt"
