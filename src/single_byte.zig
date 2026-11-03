@@ -15,14 +15,16 @@
 //! `pshufb` (SSSE3, AVX2) or NEON's `tbl` where it holds more than two
 //! bytes from 0x80, or lane by lane (docs/slop/results/simd-portable-20261103.md).
 //! To UTF-8, those blocks go to UTF-16 first, up to `codec.stage_len`
-//! bytes, which utf transcodes.
+//! bytes, which `codec.bmpToUtf8` transcodes.
 //!
 //! The encoder has no reverse table: a code point in the table's longest
 //! run of consecutive code points (in a block, also its second longest)
 //! is arithmetic, and any other is a vector search of the 128 entries, so
 //! each encoding costs its 256-byte table and nothing more. From UTF-16, a block's ASCII and runs' lanes are
 //! arithmetic on all lanes at once and the rest are searched for lane by
-//! lane; from UTF-8, utf transcodes long input to UTF-16 first.
+//! lane; from UTF-8, `codec.utf8ToBmp` transcodes long input to UTF-16
+//! first. Neither direction calls utf, whose transcoders would bring
+//! their tables and, below AVX-512, their run-time dispatch.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -135,7 +137,7 @@ pub const Decoder = struct {
                 o += a;
                 if (a != 0) continue;
                 // Up to `stage_len` bytes, whole blocks, to UTF-16, then
-                // utf transcodes them, as far as they fit.
+                // to UTF-8, as far as they fit.
                 const n = @min(stage.len, (src.len - i) / block * block);
                 var len: usize = 0;
                 while (len < n) : (len += block) {
@@ -485,10 +487,12 @@ pub const Encoder = struct {
                         continue;
                     }
                 }
-            } else if (src.len - i >= 4 * block and dst.len - o >= block and codec.denseUtf8(src[i..][0..block])) {
+            } else if (src.len - i >= codec.staged_min and dst.len - o >= block and
+                codec.denseUtf8(src[i..][0..block]))
+            {
                 // Text with more than the odd accented letter through
-                // UTF-16, but for the last few units, where a call into
-                // utf costs more than they do.
+                // UTF-16, but for the last few units, where staging costs
+                // more than they do.
                 const r = codec.encodeStaged(e, src[i..], dst[o..], mode);
                 if (r.read != 0) {
                     i += r.read;

@@ -4,8 +4,8 @@
 //!
 //! Both directions are arithmetic on 16 lanes at once: a byte from 0x80
 //! is its code point's low byte, so decoding adds 0xF700 to those lanes
-//! and encoding truncates every lane it can map. Decoding to UTF-8 stages
-//! the UTF-16 for utf to transcode, as single_byte.zig does.
+//! and encoding truncates every lane it can map. Decoding long input to
+//! UTF-8 stages the UTF-16 for `codec.bmpToUtf8`, as single_byte.zig does.
 
 const std = @import("std");
 const codec = @import("codec.zig");
@@ -64,7 +64,7 @@ pub const Decoder = struct {
                 }
                 if (src.len - i >= 4 * block) {
                     // Long input: up to `stage_len` bytes, whole blocks, to
-                    // UTF-16, which utf transcodes as far as it fits.
+                    // UTF-16, then to UTF-8 as far as it fits.
                     var stage: [codec.stage_len]u16 = undefined;
                     const n = @min(stage.len, (src.len - i) / block * block);
                     var k: usize = 0;
@@ -75,8 +75,8 @@ pub const Decoder = struct {
                     if (c.read != n) break;
                     continue;
                 }
-                // Short input, where a call into utf costs more than the
-                // bytes: each byte as its UTF-8, little-endian in a `u32`:
+                // Short input, where staging costs more than the bytes:
+                // each byte as its UTF-8, little-endian in a `u32`:
                 // itself, or EF, 9E or 9F, and 80 plus its low six bits.
                 const wide: @Vector(block, u32) = v;
                 const three = @as(@Vector(block, u32), @splat(0x80_9E_EF)) |
@@ -170,7 +170,9 @@ pub const Encoder = struct {
                     o += k;
                     continue;
                 }
-            } else if (src.len - i >= 4 * block and dst.len - o >= block and codec.denseUtf8(src[i..][0..block])) {
+            } else if (src.len - i >= codec.staged_min and dst.len - o >= block and
+                codec.denseUtf8(src[i..][0..block]))
+            {
                 const r = codec.encodeStaged(e, src[i..], dst[o..], mode);
                 if (r.read != 0) {
                     i += r.read;
