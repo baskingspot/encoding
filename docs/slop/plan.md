@@ -80,8 +80,24 @@ every buffer.
   UTF-16 as U+FFFD, as the standard's UTF-8 decoder and its "convert to a
   scalar value" do. `docs/slop/adding-an-encoding.md` is the family
   contract behind both.
-- One-call conveniences over a whole buffer into a caller's buffer, and a
-  `std.Io.Reader`/`std.Io.Writer` adapter that transcodes a stream.
+- One-call conversions (`src/convert.zig`): `decodeToUtf8(D, enc, src,
+dst, options)`, `decodeToUtf16`, `encodeFromUtf8(E, ...)`, and
+  `encodeFromUtf16`, with the decoder or encoder type first so a
+  `DecoderFor` caller links only its set and passes its options. They
+  return `Decoded(Unit)` (`text`, `encoding`, and in fatal mode
+  `malformed`) or `Encoded` (`bytes`, `unmappable`), or
+  `error.NoSpaceLeft`; the type's max-length methods size `dst`. The
+  standard's entry points are option values: decode is `.{}`, UTF-8 decode
+  is `.utf_8` with `.bom = .remove`, decode without BOM is `.bom = .keep`,
+  and encode or fail is `.mode = .fatal`. Fatal mode returns the position
+  on the result, since a Zig error cannot carry one.
+- Stream adapters (`src/io.zig`): `DecodingReader(D)`, a `std.Io.Reader` of
+  UTF-8 over another reader, and `EncodingWriter(E)`, a `std.Io.Writer` of
+  UTF-8 onto another writer with `end` to finish (it does not flush the
+  underlying writer); both over caller buffers, with fatal errors as
+  `ReadFailed`/`WriteFailed` and their position in `malformed`/
+  `unmappable`. UTF-8 only, since std.Io is bytes; UTF-16 adapters wait
+  for someone to ask.
 - `detect`: a `Detector` fed chunks with `feed`, then asked for `guess` or
   a ranked `guesses`, with `Hints` (top-level domain, declared language,
   whether UTF-8 may be guessed). Candidates are chardetng's set; UTF-16 is
@@ -290,12 +306,15 @@ lines it needs to `root.zig`, `build.zig`, `justfile`, `flake.nix`,
 Wave 4, two orbs in parallel. The orchestrating thread owns everything
 not listed, under the same rules as wave 2b and wave 3.
 
-- **Conveniences and streams** (running, branch `wave4-io`): new files
-  only, `src/convert.zig` and `src/io.zig` or as it settles: one-call
-  conversions of a whole buffer into a caller's buffer, and a
-  `std.Io.Reader` that decodes a stream to UTF-8 and a `std.Io.Writer` that
-  encodes UTF-8 to a stream, with fuzz targets and per-call measurements.
-  Proposes README text for its API.
+- **Conveniences and streams** (landed at `dfa837c`; io-20261103.md):
+  `src/convert.zig`, `src/io.zig`, `test/adapters.zig` (a test and the
+  fuzz targets `reader` and `writer`), and `bench/io/`. Conversions are
+  1.0004x a direct call (1.0024x at 16 bytes) and link what their type
+  links. DecodingReader is within 2.1% of a loop of calls on legacy
+  encodings and 5.3% on UTF-8; EncodingWriter is within 1.5% and 5.8%.
+  The reader asks the destination writer for four bytes of room (asking
+  for one cost 13-21% on UTF-8), so a fixed writer with 1-3 bytes free
+  fails `stream`.
 - **README with numbers** (running, branch `wave4-readme`): `README.md`,
   `bench/README.md`, and its results file. A full benchmark run of main
   against every arm, table sizes against encoding_rs, and detection
