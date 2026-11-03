@@ -42,6 +42,14 @@ pub const detect = @import("detect.zig");
 /// The charset detector: feed it bytes, then ask for its guess.
 pub const Detector = detect.Detector;
 
+const convert = @import("convert.zig");
+pub const decodeToUtf8 = convert.decodeToUtf8;
+pub const decodeToUtf16 = convert.decodeToUtf16;
+pub const encodeFromUtf8 = convert.encodeFromUtf8;
+pub const encodeFromUtf16 = convert.encodeFromUtf16;
+pub const Decoded = convert.Decoded;
+pub const Encoded = convert.Encoded;
+
 test {
     std.testing.refAllDecls(@This());
     _ = codec;
@@ -50,4 +58,5 @@ test {
     _ = coder;
     _ = @import("specialized_test.zig");
     _ = detect;
+    _ = convert;
 }
