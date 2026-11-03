@@ -1,8 +1,7 @@
 # Detection: corpus, trainer, and scoring
 
 How `src/detect.zig`'s models are trained and how the detector is scored
-against chardetng and uchardet. Measurements are in
-`docs/slop/results/detect-20261103.md`.
+against chardetng and uchardet.
 
 ## Corpus
 
@@ -38,8 +37,8 @@ article.
 and the standard's indexes and writes `src/detect/tables.zig`; `just
 detect-gen` runs it and `just detect-check` fails if the committed tables
 differ from what it writes. Its header describes the models. `detect-train
-variant NAME OUT` writes one of the variants measured for decision 5 in
-`docs/slop/plan.md`; `just detect-variants` scores them all.
+variant NAME OUT` writes one of the model variants the detector was
+chosen from; `just detect-variants` scores them all.
 
 ## Scoring
 

@@ -1,7 +1,7 @@
 # encoding: Legacy text encodings in Zig with no C: the WHATWG Encoding Standard's Shift_JIS, GBK, Big5, EUC-KR, windows-125x, and the rest. `just --list` shows the recipes.
 # AGENTS.md holds the working conventions.
 
-markdown := "README.md AGENTS.md CHANGELOG.md THIRD_PARTY.md docs/slop bench/README.md .github"
+markdown := "README.md AGENTS.md CHANGELOG.md THIRD_PARTY.md docs/slop bench/README.md test/detect/README.md .github"
 zig_dirs := "src gen test bench/zig build.zig build.zig.zon bench/build.zig bench/build.zig.zon"
 
 [private]
@@ -44,6 +44,7 @@ lint:
     zig fmt --check {{ zig_dirs }} test/oracle/compare.zig
     cargo fmt --check --manifest-path test/oracle/rs/Cargo.toml
     cargo fmt --check --manifest-path bench/rust/Cargo.toml
+    cargo fmt --check --manifest-path test/detect/rs/Cargo.toml
     test -z "$(gofmt -l bench/go)"
     nix fmt -- --ci
     oxfmt --check {{ markdown }}
@@ -57,6 +58,7 @@ fmt:
     zig fmt {{ zig_dirs }}
     cargo fmt --manifest-path test/oracle/rs/Cargo.toml
     cargo fmt --manifest-path bench/rust/Cargo.toml
+    cargo fmt --manifest-path test/detect/rs/Cargo.toml
     gofmt -w bench/go
     nix fmt
     oxfmt {{ markdown }}
