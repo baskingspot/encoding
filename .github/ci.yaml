@@ -9,3 +9,4 @@ jobs:
   - recipe: oracle
   - recipe: wpt
   - recipe: test-big-endian
+  - recipe: test-aarch64

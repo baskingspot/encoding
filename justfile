@@ -19,6 +19,11 @@ test:
 test-big-endian:
     zig build test -Dtarget=s390x-linux-musl -fqemu -Doptimize=ReleaseSafe --summary all
 
+[doc("The tests on aarch64 under qemu, where single-byte decode looks blocks up with NEON")]
+[group("test")]
+test-aarch64:
+    zig build test -Dtarget=aarch64-linux-musl -fqemu -Doptimize=ReleaseSafe --summary all
+
 [doc("Generate every multi-byte index in every table layout into the cache, and check each against its index in full")]
 [group("test")]
 test-layouts:
@@ -296,7 +301,7 @@ bench-rodata: bench-build
 
 [doc("Everything CI runs")]
 [group("ci")]
-ci: test check test-layouts lint fuzz-ci oracle wpt test-big-endian
+ci: test check test-layouts lint fuzz-ci oracle wpt test-big-endian test-aarch64
 
 # Detection (src/detect.zig, test/detect/README.md). The corpus, its
 # training text, and the test samples go under the gitignored zig-out/detect/.
