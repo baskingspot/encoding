@@ -23,7 +23,7 @@ operation it has no equivalent for.
 | Arm        | Program                               | Library                                                                      |
 | ---------- | ------------------------------------- | ---------------------------------------------------------------------------- |
 | `rust`     | `bench/rust/src/main.rs`              | encoding_rs 0.8.44 (`bench/rust/Cargo.lock`), the bar every arm is held to   |
-| `zig`      | `bench/zig/arm.zig`                   | this package, ReleaseFast for the host CPU                                   |
+| `zig`      | `bench/zig/arm.zig`                   | this package, ReleaseFast for the host CPU (`bench/build.zig`)               |
 | `icu`      | `bench/c/arm.c` with `-DARM_ICU`      | ICU 78 from the dev shell's nixpkgs                                          |
 | `iconv`    | `bench/c/arm.c` with `-DARM_ICONV`    | glibc's iconv                                                                |
 | `libiconv` | `bench/c/arm.c` with `-DARM_LIBICONV` | GNU libiconv from the dev shell                                              |
@@ -56,6 +56,16 @@ The arms do not all do the same work:
   its arm writes U+FFFD, or `&#N;` when encoding, and goes on.
 - x/text converts only to and from UTF-8, so its arm skips the UTF-16
   operations; it keeps one transformer for a row and resets it per call.
+- They are not built for the same CPU. This package's arm is built for the
+  host, and uses AVX-512 where the host has it; encoding_rs's for Rust's
+  default x86-64 target, with its own SSE2 code (its `simd-accel` feature
+  needs nightly Rust); the C arms' libraries come prebuilt from nixpkgs for
+  generic x86-64; Go's for `GOAMD64=v1`. To time this package for another
+  CPU, build its arm in `bench/` with `-Dcpu`, as in
+  `zig build -Dcpu=baseline -p /tmp/base`, copy `bin/bench-zig` to
+  `zig-out/bin/bench-<name>`, and add `<name>` to `arms` after `zig`. The
+  summary covers only the six arms above; another arm's rows are in
+  `benchstat.txt` and `raw-<name>.txt`.
 
 ## Equivalence
 
@@ -135,7 +145,23 @@ ratio to encoding_rs. `rows.txt` has every row against every arm.
 Everything lands in `zig-out/bench-compare/`; `just bench-summary [DIR]`
 prints the summary again.
 
-`just bench-rodata` counts the bytes the single-byte tables take in this
-package's and encoding_rs's arm binaries, by finding each table's 128 code
-points in the binary (both store them the same way), and prints each
-binary's `.rodata` and `.text` sizes.
+## Size
+
+`just bench-rodata` counts the bytes each of this package's generated
+tables takes in its arm binary, by finding the table's arrays in the
+binary, and the same for encoding_rs's arm, which stores only the
+single-byte tables and gb18030's ranges the same way; then the size of
+encoding_rs's own tables, its `encoding_rs::data` symbols; then each
+binary's `.rodata` and `.text`. Both arms link every encoding.
+
+`bench/comptime/sizes.sh` builds the link-size programs in
+`bench/comptime/size.zig`, each a small program that decodes or encodes
+stdin with one way of using the API (`Decoder` on a label, a
+`DecoderFor` of one encoding, an `Encoder`, ...), in ReleaseSmall and
+ReleaseFast for the host CPU, and prints each program's `.rodata` and
+`.text` net of one that only copies stdin. Pass `-Dcpu` or `-Dtarget` to
+`zig build sizes` in that directory for another target: the size of a
+single-byte decoder or encoder depends on it, since it links utf's UTF-8
+and UTF-16 transcoders, whose kernels for targets without AVX-512 carry
+lookup tables, and for an x86-64 CPU below AVX-512 utf's run-time dispatch
+over the kernels above it.
