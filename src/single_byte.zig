@@ -12,10 +12,12 @@
 //! (docs/slop/results/single-byte-20261102.md). Decoding copies ASCII
 //! blocks (widened for UTF-16), two blocks a step once one is ASCII, and
 //! looks up any other block whole: with AVX-512BW's `vpermi2w`, with
-//! `pshufb` (SSSE3, AVX2) or NEON's `tbl` where it holds more than two
-//! bytes from 0x80, or lane by lane (docs/slop/results/simd-portable-20261103.md).
-//! To UTF-8, those blocks go to UTF-16 first, up to `codec.stage_len`
-//! bytes, which `codec.bmpToUtf8` transcodes.
+//! `pshufb` (SSSE3, AVX2) or NEON's `tbl`, or elsewhere with a load a
+//! lane, where it holds more than two bytes from 0x80, and lane by lane
+//! where it holds fewer (docs/slop/results/simd-portable-20261103.md,
+//! single-byte-size-20261103.md). To UTF-8, those blocks go to UTF-16
+//! first, up to `codec.stage_len` bytes, which `codec.bmpToUtf8`
+//! transcodes.
 //!
 //! The encoder has no reverse table: a code point in the table's longest
 //! run of consecutive code points (in a block, also its second longest)
@@ -197,11 +199,12 @@ inline fn decodeBlock(
     const high = v >= @as(V, @splat(0x80));
     var m = codec.highBits(high);
     // The byte shuffles cost more than patching a lane or two, as in
-    // Latin text with the odd accented letter; `vpermi2w` does not.
-    if (block_lookup != .none and (block_lookup == .avx512 or @popCount(m) > 2)) {
+    // Latin text with the odd accented letter, and `gatherBlock` more
+    // than patching all but a few; `vpermi2w` does not.
+    if (block_lookup == .avx512 or dense(m)) {
         // Every lane looked up, no branch on the bytes: ASCII lanes take
         // their byte, the rest their table entry.
-        const cps = lookupBlock(table, planes, v);
+        const cps = if (block_lookup == .none) gatherBlock(table, s) else lookupBlock(table, planes, v);
         var out = @select(u16, high, cps, wide);
         const bad = @select(bool, high, cps == @as(W, @splat(0)), @as(@Vector(block, bool), @splat(false)));
         const bad_bits = codec.highBits(bad);
@@ -229,11 +232,23 @@ inline fn decodeBlock(
     return block;
 }
 
+/// Whether a block whose bytes from 0x80 are the bits of `m` has enough
+/// of them that `decodeBlock` looks it up whole rather than lane by lane:
+/// more than two, or for `gatherBlock` more than twelve, which is fewer
+/// than four clear bits and takes no popcount, which the x86-64 baseline
+/// lacks.
+inline fn dense(m: u16) bool {
+    if (block_lookup != .none) return @popCount(m) > 2;
+    var x = ~m;
+    inline for (0..3) |_| x &= x -% 1;
+    return x == 0;
+}
+
 /// How `lookupBlock` looks a block up, chosen at compile time from the
 /// target's features: AVX-512BW's `vpermi2w` over the table; `pshufb`
 /// (SSSE3, or AVX2's on the low and high bytes at once) or NEON's `tbl`
-/// over `Planes`; or `none`, lane by lane. The intrinsics need the LLVM
-/// backend.
+/// over `Planes`; or `none`, a load a lane (`gatherBlock`). The
+/// intrinsics need the LLVM backend.
 const Lookup = enum { avx512, avx2, ssse3, neon, none };
 
 const block_lookup: Lookup = blk: {
@@ -341,6 +356,23 @@ inline fn lookupBlock(table: *const Table, planes: PlanesPtr, v: V) W {
         },
         .none => unreachable,
     }
+}
+
+/// `table[b & 0x7F]` for each lane's byte `b`, where the target has no
+/// byte shuffle (the x86-64 baseline, SSE2): a load a lane, four units
+/// put together in a 64-bit register, which costs fewer vector shuffles
+/// than putting the units in one by one. Every lane, with no loop and no
+/// branch, so that a block costs the same whatever its bytes.
+inline fn gatherBlock(table: *const Table, s: *const [block]u8) W {
+    var q: [block / 4]u64 = undefined;
+    inline for (&q, 0..) |*x, g| {
+        x.* = 0;
+        inline for (0..4) |j| {
+            const at = if (codec.native_endian == .little) 16 * j else 48 - 16 * j;
+            x.* |= @as(u64, table[s[4 * g + j] & 0x7F]) << at;
+        }
+    }
+    return @bitCast(q);
 }
 
 /// Code units from their low and high bytes.
