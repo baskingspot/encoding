@@ -204,19 +204,19 @@ Everything above is this package built for the host CPU, which has AVX-512, agai
 
 | Family and direction | Host, 64 KiB | x86-64-v3 | Baseline | Host, 16 bytes | x86-64-v3 | Baseline |
 | -------------------- | -----------: | --------: | -------: | -------------: | --------: | -------: |
-| UTF-8 decode         |        2.25x |     2.25x |    2.22x |          0.89x |     0.94x |    1.11x |
-| UTF-16 decode        |        7.84x |     7.56x |    5.72x |          1.24x |     1.31x |    1.43x |
-| Single-byte decode   |        6.76x |     4.71x |    2.83x |          1.57x |     1.41x |    1.51x |
-| Single-byte encode   |        5.90x |     4.55x |    3.38x |          2.05x |     1.91x |    1.77x |
-| Japanese decode      |        2.50x |     2.45x |    2.40x |          1.26x |     1.25x |    1.29x |
-| Japanese encode      |       10.37x |    10.10x |    8.04x |          2.84x |     2.78x |    2.63x |
-| Chinese decode       |        2.13x |     2.11x |    2.09x |          1.48x |     1.46x |    1.50x |
-| Chinese encode       |       26.36x |    25.68x |   20.59x |          4.66x |     4.59x |    4.20x |
-| Korean decode        |        1.49x |     1.43x |    1.44x |          1.50x |     1.45x |    1.49x |
-| Korean encode        |        4.61x |     4.50x |    3.69x |          2.59x |     2.52x |    2.35x |
-| Every row            |        6.00x |     4.73x |    3.38x |          1.83x |     1.71x |    1.70x |
+| UTF-8 decode         |        2.33x |     2.38x |    2.35x |          1.35x |     1.28x |    1.19x |
+| UTF-16 decode        |        6.82x |     7.14x |    5.76x |          1.45x |     1.48x |    1.41x |
+| Single-byte decode   |        7.60x |     5.51x |    3.24x |          1.90x |     1.55x |    1.40x |
+| Single-byte encode   |        7.11x |     5.49x |    3.99x |          2.27x |     1.98x |    1.80x |
+| Japanese decode      |        2.71x |     2.86x |    2.85x |          1.31x |     1.32x |    1.34x |
+| Japanese encode      |       10.03x |     9.87x |    7.87x |          2.86x |     2.82x |    2.63x |
+| Chinese decode       |        2.20x |     2.21x |    2.08x |          1.41x |     1.39x |    1.26x |
+| Chinese encode       |       24.25x |    23.54x |   19.25x |          4.55x |     4.50x |    4.12x |
+| Korean decode        |        1.52x |     1.49x |    1.52x |          1.45x |     1.40x |    1.31x |
+| Korean encode        |        4.87x |     4.69x |    3.98x |          2.56x |     2.48x |    2.34x |
+| Every row            |        6.69x |     5.39x |    3.81x |          2.05x |     1.80x |    1.65x |
 
-(UTF-8 to UTF-8 is left out.) The UTF-8 and UTF-16 paths go through baskingspot/utf, which picks its AVX-512 kernels at run time on a generic build, so they keep their speed. The single-byte loops lose the most: at baseline, every single-byte encoding decodes text with no ASCII in it to UTF-16 at 0.61 to 0.63x encoding_rs's speed at 64 KiB, and Thai text in windows-874 at 0.78 to 0.89x; built for x86-64-v3, no single-byte decode row of 64 KiB is below encoding_rs.
+(UTF-8 to UTF-8 is left out. The three builds were timed in one run of their own, so the host columns differ a little from the tables above.) Every conversion between UTF-8 and UTF-16, the single-byte encodings' included, goes through baskingspot/utf, which on a generic build picks its AVX-512 kernels at run time, so those keep their speed. The single-byte loops lose the most, in their own table lookups: at baseline, without SSSE3's byte shuffle, Latin text with the odd accented letter decodes to UTF-8 at 0.72 to 1.00x encoding_rs's speed at 64 KiB in macintosh, windows-1252, and ISO-8859-3, -14, and -15. Built for x86-64-v3, no single-byte decode row of 64 KiB is below encoding_rs.
 
 ### Size
 
@@ -224,17 +224,17 @@ Every encoding's tables take 307,099 bytes in a program that links them all, aga
 
 What a small program that converts stdin links, in ReleaseSmall, net of one that only copies stdin to stdout, in bytes of `.rodata` + `.text`:
 
-| Program                          | x86-64 with AVX-512 |        x86-64-v3 |  x86-64 baseline |          aarch64 |
-| -------------------------------- | ------------------: | ---------------: | ---------------: | ---------------: |
-| `Decoder`, any encoding by label |    185,626 + 35,544 | 250,957 + 49,459 | 256,863 + 70,499 | 220,672 + 34,224 |
-| `Encoder`, any encoding by label |    169,560 + 18,739 | 199,608 + 25,230 | 196,884 + 37,262 | 169,760 + 21,684 |
-| `DecoderFor(&.{.windows_1252})`  |         354 + 2,698 |    9,352 + 3,600 |      544 + 5,891 |    9,264 + 3,316 |
-| `EncoderFor(&.{.windows_1252})`  |       1,912 + 4,476 |    4,456 + 4,819 |      608 + 7,105 |    4,432 + 5,740 |
-| `DecoderFor(&.{.shift_jis})`     |      16,530 + 3,298 |   16,552 + 3,304 |   16,528 + 3,255 |   16,528 + 3,308 |
-| `DecoderFor(&.{.gb18030})`       |      48,762 + 4,892 |   48,784 + 4,900 |   48,752 + 4,823 |   48,768 + 4,832 |
-| `DecoderFor(&.{.euc_kr})`        |      47,562 + 2,659 |   47,560 + 2,666 |   47,552 + 2,645 |   47,552 + 2,920 |
+| Program                          | x86-64 with AVX-512 |        x86-64-v3 | x86-64-v3, no dispatch |  x86-64 baseline | baseline, no dispatch |          aarch64 |
+| -------------------------------- | ------------------: | ---------------: | ---------------------: | ---------------: | --------------------: | ---------------: |
+| `Decoder`, any encoding by label |    185,626 + 35,525 | 251,749 + 50,408 |       221,334 + 35,906 | 274,703 + 74,623 |      184,384 + 32,917 | 220,688 + 34,404 |
+| `Encoder`, any encoding by label |    167,160 + 18,744 | 200,344 + 27,558 |       170,028 + 20,494 | 205,804 + 43,223 |      166,016 + 22,050 | 169,760 + 21,528 |
+| `DecoderFor(&.{.windows_1252})`  |         369 + 2,688 |   39,738 + 7,439 |          9,448 + 3,717 |  49,446 + 12,918 |           544 + 5,974 |    9,280 + 3,508 |
+| `EncoderFor(&.{.windows_1252})`  |         999 + 5,307 |  34,800 + 10,746 |          4,488 + 5,817 |  40,132 + 18,211 |           528 + 8,475 |    4,432 + 6,720 |
+| `DecoderFor(&.{.shift_jis})`     |      16,530 + 3,298 |   16,552 + 3,304 |         16,552 + 3,304 |   16,528 + 3,255 |        16,528 + 3,255 |   16,528 + 3,308 |
+| `DecoderFor(&.{.gb18030})`       |      48,762 + 4,892 |   48,784 + 4,900 |         48,784 + 4,900 |   48,752 + 4,823 |        48,752 + 4,823 |   48,768 + 4,832 |
+| `DecoderFor(&.{.euc_kr})`        |      47,562 + 2,659 |   47,560 + 2,666 |         47,560 + 2,666 |   47,552 + 2,645 |        47,552 + 2,645 |   47,552 + 2,920 |
 
-The single-byte decoders and encoders convert between UTF-8 and UTF-16 with code of their own: a one-encoding windows-1252 decoder is 3 KB with AVX-512, 6 KB for baseline x86-64, and 13 KB for x86-64-v3 or aarch64, most of it shuffle tables. A program that decodes UTF-8 or UTF-16 links baskingspot/utf for them, whose kernels for targets without AVX-512 carry lookup tables, and an x86-64 build for a CPU below AVX-512 links utf's kernels for every level above its own too, to pick one at run time. encoding_rs has no build for fewer encodings: a program that uses it links all of its tables.
+Every conversion between UTF-8 and UTF-16, the single-byte encodings' included, is baskingspot/utf's. Built for a generic x86-64 CPU, an x86-64 level or the baseline, utf picks its SIMD kernels at run time and links them for every level above the target's: that is most of what the x86-64-v3 and baseline columns add over the native one, much of it constant tables the linker keeps whole. Build with `.dispatch = false` (`b.dependency("encoding", .{ .dispatch = false })`, or `-Ddispatch=false`) to link only the target's own kernels: a one-encoding windows-1252 decoder is then 6 to 13 KB, but a baseline binary runs SSE2 code on every CPU. A native or named CPU never dispatches. encoding_rs has no build for fewer encodings: a program that uses it links all of its tables.
 
 ### Detection
 
