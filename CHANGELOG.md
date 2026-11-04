@@ -15,11 +15,12 @@ All notable changes to encoding are recorded here. The format follows
 - GBK, gb18030, and Big5 decoders and encoders.
 - EUC-KR decoder and encoder.
 - IBM437 and IBM850 decoders and encoders, from Unicode's mappings of the IBM code pages. They have no labels, so `Encoding.forLabel` never returns them; name them as `.ibm437` and `.ibm850`.
-- `DecoderFor(encodings)` and `EncoderFor(encodings)`: a decoder or encoder for a set of encodings fixed at compile time, which links only those encodings' code and tables (a windows-1252 decoder adds about 3 KB of code and tables for an AVX-512 CPU, 6 KB for baseline x86-64, and 13 to 14 KB for x86-64-v2, x86-64-v3, or aarch64, instead of about 220 KB). `Decoder` is now `DecoderFor(&implemented)` and `Encoder` `EncoderFor(&implemented)`, with the same calls. A set without `bom_encodings` takes `OptionsWithoutSniff`, which has no `.sniff`.
+- `DecoderFor(encodings)` and `EncoderFor(encodings)`: a decoder or encoder for a set of encodings fixed at compile time, which links only those encodings' code and tables (a windows-1252 decoder adds about 3 KB of code and tables for a native AVX-512 build, 6 to 14 KB for aarch64 or an x86-64 build with `.dispatch = false`, and 47 to 62 KB for a generic x86-64 build that picks its SIMD kernels at run time, instead of about 220 KB). `Decoder` is now `DecoderFor(&implemented)` and `Encoder` `EncoderFor(&implemented)`, with the same calls. A set without `bom_encodings` takes `OptionsWithoutSniff`, which has no `.sniff`.
 
 - `Detector` (`encoding.detect`): charset detection for unlabeled bytes, as Firefox's chardetng does. Feed it chunks, then call `guess` or `guesses` for a confidence-ranked answer among UTF-8, the CJK encodings, and the single-byte encodings legacy web pages used. It takes optional `Hints`: `tld`, `language`, and `allow_utf8`. It allocates nothing and keeps 864 bytes of state.
 - `decodeToUtf8`, `decodeToUtf16`, `encodeFromUtf8`, and `encodeFromUtf16`: convert a whole buffer into one you own in a single call. Pass the decoder or encoder type first (`Decoder`, or a `DecoderFor` to link only its encodings). You get back `Decoded` or `Encoded`, which in fatal mode also carry the first error and its position, or `error.NoSpaceLeft`. A buffer of the type's `maxUtf8Len` (or `maxUtf16Len`, `maxLenFromUtf8`, `maxLenFromUtf16`) always fits.
 - `DecodingReader(D)` and `EncodingWriter(E)`: a `std.Io.Reader` that decodes another reader's bytes to UTF-8, and a `std.Io.Writer` that encodes the UTF-8 written to it onto another writer, over buffers you give them. Call `end` to finish an `EncodingWriter`'s stream; it does not flush the underlying writer.
+- The `dispatch` build option (`-Ddispatch`, or `.dispatch` in `b.dependency("encoding", ...)`), passed to baskingspot/utf: whether a build for a generic x86-64 CPU picks its SIMD kernels at run time. Unset, utf decides: on for an x86-64 level or the baseline, off for a native or named CPU. `false` makes such a build smaller (a windows-1252 decoder for x86-64-v3 13 KB instead of 47 KB) but runs only that level's kernels on every CPU.
 
 ### Changed
 
@@ -31,6 +32,7 @@ All notable changes to encoding are recorded here. The format follows
 - The single-byte encodings, x-user-defined, UTF-16LE, and UTF-16BE decode and encode 16 bytes at a time: 1.4 to 14 times faster depending on direction, and no longer faster or slower with where the linker places them.
 
 - Single-byte decoding (windows-125x, ISO-8859, KOI8, IBM866, macintosh, ...) is faster on x86-64 without AVX-512 and on aarch64: blocks of 16 bytes are looked up with `pshufb` (SSSE3, AVX2) or NEON `tbl`, chosen at compile time from the target CPU. Single-byte encoding is faster on every target.
+- Requires baskingspot/utf v0.2.0. The single-byte encodings and x-user-defined convert to and from UTF-8 with utf's converters, so a generic x86-64 build runs them with the CPU's best kernels too: on an AVX-512 CPU, a baseline build decodes single-byte text to UTF-8 about 1.5 times as fast as with the converters it had.
 
 ### Fixed
 
