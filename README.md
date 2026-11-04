@@ -226,15 +226,15 @@ What a small program that converts stdin links, in ReleaseSmall, net of one that
 
 | Program                          | x86-64 with AVX-512 |        x86-64-v3 |  x86-64 baseline |          aarch64 |
 | -------------------------------- | ------------------: | ---------------: | ---------------: | ---------------: |
-| `Decoder`, any encoding by label |    186,250 + 35,245 | 242,477 + 48,376 | 256,735 + 66,706 | 212,224 + 33,364 |
-| `Encoder`, any encoding by label |    167,960 + 19,618 | 219,823 + 30,580 | 245,413 + 46,680 | 189,888 + 23,288 |
-| `DecoderFor(&.{.windows_1252})`  |       1,049 + 5,781 |  51,012 + 12,250 |  72,550 + 17,350 |   21,168 + 4,800 |
-| `EncoderFor(&.{.windows_1252})`  |       1,775 + 5,711 |  54,338 + 13,565 |  79,804 + 21,503 |   24,608 + 8,384 |
+| `Decoder`, any encoding by label |    185,626 + 35,544 | 250,957 + 49,459 | 256,863 + 70,499 | 220,672 + 34,224 |
+| `Encoder`, any encoding by label |    169,560 + 18,739 | 199,608 + 25,230 | 196,884 + 37,262 | 169,760 + 21,684 |
+| `DecoderFor(&.{.windows_1252})`  |         354 + 2,698 |    9,352 + 3,600 |      544 + 5,891 |    9,264 + 3,316 |
+| `EncoderFor(&.{.windows_1252})`  |       1,912 + 4,476 |    4,456 + 4,819 |      608 + 7,105 |    4,432 + 5,740 |
 | `DecoderFor(&.{.shift_jis})`     |      16,530 + 3,298 |   16,552 + 3,304 |   16,528 + 3,255 |   16,528 + 3,308 |
 | `DecoderFor(&.{.gb18030})`       |      48,762 + 4,892 |   48,784 + 4,900 |   48,752 + 4,823 |   48,768 + 4,832 |
 | `DecoderFor(&.{.euc_kr})`        |      47,562 + 2,659 |   47,560 + 2,666 |   47,552 + 2,645 |   47,552 + 2,920 |
 
-The single-byte decoders and encoders depend on the target. They transcode between UTF-8 and UTF-16 with baskingspot/utf, whose kernels for targets without AVX-512 carry lookup tables, and an x86-64 build for a CPU below AVX-512 links utf's kernels for every level above its own too, to pick one at run time. A one-encoding windows-1252 decoder is 7 KB with AVX-512 and 26 KB on aarch64, but 63 KB for x86-64-v3 and 90 KB for baseline x86-64. encoding_rs has no build for fewer encodings: a program that uses it links all of its tables.
+The single-byte decoders and encoders convert between UTF-8 and UTF-16 with code of their own: a one-encoding windows-1252 decoder is 3 KB with AVX-512, 6 KB for baseline x86-64, and 13 KB for x86-64-v3 or aarch64, most of it shuffle tables. A program that decodes UTF-8 or UTF-16 links baskingspot/utf for them, whose kernels for targets without AVX-512 carry lookup tables, and an x86-64 build for a CPU below AVX-512 links utf's kernels for every level above its own too, to pick one at run time. encoding_rs has no build for fewer encodings: a program that uses it links all of its tables.
 
 ### Detection
 
