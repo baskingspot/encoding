@@ -370,6 +370,21 @@ utf's `dispatch` option through, and re-measures the README's CPU table:
 the bar is wave 5's sizes and speeds plus the baseline-on-a-newer-CPU
 speed it lost.
 
+- **utf v0.2.0** (released at utf `fab8ea5`; utf's
+  bmp-converters-20261104.md): `utf.convert.bmpToUtf8` and `utf8ToBmp`
+  under utf's dispatch. Against encoding's copies: level to 1.07x to
+  UTF-8, 1.05-1.63x from UTF-8; 1.0-1.6 KB larger without dispatch. A
+  baseline build with dispatch converts Latin text to UTF-8 at 27.0 GB/s on
+  this CPU (28.6 native, 3.9 without dispatch), but the converters then
+  cost about 78 KB: utf's AVX-512 tier keeps one 26 KB `.rodata` section
+  whole, and the shuffle tables are in both the SSE and AVX2 tiers.
+  baskingspot/utf#1 did not reproduce as filed; its residue is the
+  AVX-512 kernel inlined whole into encoding's decode loop, a trade, not
+  shipped.
+- **Repin** (running, branch `wave6-utf-repin`): `src/codec.zig`,
+  `src/single_byte.zig`, `src/x_user_defined.zig`, `build.zig`,
+  `build.zig.zon`, and `bench/`.
+
 ## Decisions to measure
 
 1. **Table layout.** encoding_rs compresses its CJK tables (ranges and
