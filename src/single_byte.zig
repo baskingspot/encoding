@@ -16,20 +16,20 @@
 //! lane, where it holds more than two bytes from 0x80, and lane by lane
 //! where it holds fewer (docs/slop/results/simd-portable-20261103.md,
 //! single-byte-size-20261103.md). To UTF-8, those blocks go to UTF-16
-//! first, up to `codec.stage_len` bytes, which `codec.bmpToUtf8`
-//! transcodes.
+//! first, up to `codec.stage_len` bytes, which utf's `bmpToUtf8`
+//! converts.
 //!
 //! The encoder has no reverse table: a code point in the table's longest
 //! run of consecutive code points (in a block, also its second longest)
 //! is arithmetic, and any other is a vector search of the 128 entries, so
 //! each encoding costs its 256-byte table and nothing more. From UTF-16, a block's ASCII and runs' lanes are
 //! arithmetic on all lanes at once and the rest are searched for lane by
-//! lane; from UTF-8, `codec.utf8ToBmp` transcodes long input to UTF-16
-//! first. Neither direction calls utf, whose transcoders would bring
-//! their tables and, below AVX-512, their run-time dispatch.
+//! lane; from UTF-8, utf's `utf8ToBmp` converts long input to UTF-16
+//! first (`codec.encodeStaged`).
 
 const std = @import("std");
 const builtin = @import("builtin");
+const utf = @import("utf");
 const codec = @import("codec.zig");
 const tables = @import("tables/single_byte.zig");
 const Encoding = codec.Encoding;
@@ -149,7 +149,7 @@ pub const Decoder = struct {
                         break;
                     }
                 }
-                const c = codec.bmpToUtf8(stage[0..len], dst[o..]);
+                const c = utf.convert.bmpToUtf8(stage[0..len], dst[o..]);
                 i += c.read;
                 o += c.written;
                 if (c.read != len) break;

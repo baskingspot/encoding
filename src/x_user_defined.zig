@@ -5,9 +5,10 @@
 //! Both directions are arithmetic on 16 lanes at once: a byte from 0x80
 //! is its code point's low byte, so decoding adds 0xF700 to those lanes
 //! and encoding truncates every lane it can map. Decoding long input to
-//! UTF-8 stages the UTF-16 for `codec.bmpToUtf8`, as single_byte.zig does.
+//! UTF-8 stages the UTF-16 for utf's `bmpToUtf8`, as single_byte.zig does.
 
 const std = @import("std");
+const utf = @import("utf");
 const codec = @import("codec.zig");
 const Encoding = codec.Encoding;
 const DecodeResult = codec.DecodeResult;
@@ -69,7 +70,7 @@ pub const Decoder = struct {
                     const n = @min(stage.len, (src.len - i) / block * block);
                     var k: usize = 0;
                     while (k < n) : (k += block) stage[k..][0..block].* = decodeBlock(src[i + k ..][0..block]);
-                    const c = codec.bmpToUtf8(stage[0..n], dst[o..]);
+                    const c = utf.convert.bmpToUtf8(stage[0..n], dst[o..]);
                     i += c.read;
                     o += c.written;
                     if (c.read != n) break;
