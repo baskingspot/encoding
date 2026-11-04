@@ -386,9 +386,29 @@ speed it lost.
   three-byte path when it matters; after the repin, utf v0.2.1 shrinks
   dispatch (split the AVX-512 tier's `.rodata`, up to 26 KB; share the BMP
   shuffle tables between the SSE and AVX2 tiers, 12.8 KB).
-- **Repin** (running, branch `wave6-utf-repin`): `src/codec.zig`,
-  `src/single_byte.zig`, `src/x_user_defined.zig`, `build.zig`,
-  `build.zig.zon`, and `bench/`.
+- **Repin** (landed at `7315679`; utf-repin-20261104.md): encoding pins
+  utf v0.2.0; `single_byte.zig` and `x_user_defined.zig` call
+  `utf.convert.bmpToUtf8` and `codec.encodeStaged` calls
+  `utf.convert.utf8ToBmp`; `codec.zig`'s converters, tables, and
+  intrinsics are gone, and `staged_min` is 64 bytes everywhere.
+  `-Ddispatch` forwards utf's option, unset by default so utf decides (on
+  for a generic x86-64 CPU). Without dispatch utf's converters match
+  encoding's (decode to UTF-8 0.99-1.02x, encode from UTF-8 0.97-1.02x;
+  -v2 encode 0.96x from 256 bytes), sizes are within 0.2-1.6 KB, and
+  `Decoder` is 43-110 KB smaller off the host. With dispatch on this
+  AVX-512 CPU, a baseline build decodes single-byte text to UTF-8 at 1.49x
+  main and 0.96x the pre-wave-5 build, and encodes from UTF-8 at 0.99x it;
+  its decode rows below encoding_rs went 264 to 47, all Latin text with
+  the odd accented letter, where the baseline block lookup is 0.69x the
+  pre-wave-5 one (DecodeUtf16 too), a follow-up. A dispatched 16-byte
+  `mixed`/`nonascii` decode on -v2 is 0.82x, accepted. Dispatch costs a
+  one-encoding single-byte program 34-56 KB, utf's tier constants, which
+  utf v0.2.1 is queued to shrink. CJK code is unchanged, instruction for
+  instruction. README CPU table (10 rounds): every row 6.69x host, 5.39x
+  v3, 3.81x baseline at 64 KiB.
+- **utf v0.2.1, dispatch size** (running on baskingspot/utf, branch
+  `dispatch-size`): split the AVX-512 tier's `.rodata` and share the BMP
+  shuffle tables between the SSE and AVX2 tiers; then encoding repins.
 
 ## Decisions to measure
 
