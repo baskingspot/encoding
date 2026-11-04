@@ -25,6 +25,7 @@ pub fn build(b: *std.Build) void {
     // One program per variant, each reading stdin and writing stdout.
     const sizes = b.step("sizes", "Build the link-size programs");
     const strip = b.option(bool, "strip", "Strip the link-size programs (default: the mode's default)");
+    const dispatch = b.option(bool, "dispatch", "Forwarded to the package's -Ddispatch (default: utf's)");
     for (std.enums.values(Variant)) |v| {
         const opts = b.addOptions();
         opts.addOption(Variant, "variant", v);
@@ -35,7 +36,7 @@ pub fn build(b: *std.Build) void {
             .strip = strip,
         });
         mod.addOptions("options", opts);
-        if (v != .none) mod.addImport("encoding", package(b, target, optimize));
+        if (v != .none) mod.addImport("encoding", package(b, target, optimize, dispatch));
         const exe = b.addExecutable(.{ .name = b.fmt("size-{t}", .{v}), .root_module = mod });
         sizes.dependOn(&b.addInstallArtifact(exe, .{}).step);
     }
@@ -52,7 +53,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = .ReleaseFast,
             .imports = &.{
-                .{ .name = "encoding", .module = package(b, target, .ReleaseFast) },
+                .{ .name = "encoding", .module = package(b, target, .ReleaseFast, null) },
                 .{ .name = "testingx", .module = testingx },
             },
         });
@@ -111,8 +112,14 @@ pub const Variant = enum {
 };
 
 /// The package's module, as a consumer gets it.
-fn package(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Module {
-    return b.dependency("encoding", .{ .target = target, .optimize = optimize }).module("encoding");
+fn package(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    dispatch: ?bool,
+) *std.Build.Module {
+    const dep = b.dependency("encoding", .{ .target = target, .optimize = optimize, .dispatch = dispatch });
+    return dep.module("encoding");
 }
 
 /// A module rooted at one of the prototype's files under the package's

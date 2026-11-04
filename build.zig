@@ -8,7 +8,11 @@ pub fn build(b: *std.Build) void {
 
     // The one exported module. Everything below is a developer step, so a
     // consumer's fetch graph stops at this module and utf.
-    const utf = b.dependency("utf", .{ .target = target, .optimize = optimize }).module("utf");
+    // utf's run-time choice of x86-64 SIMD kernels; unset, utf's default:
+    // on for a generic x86-64 CPU, off for a native or named one.
+    const dispatch = b.option(bool, "dispatch", "Pick utf's x86-64 SIMD kernels at run time (default: utf's)");
+    const utf_dep = b.dependency("utf", .{ .target = target, .optimize = optimize, .dispatch = dispatch });
+    const utf = utf_dep.module("utf");
     const mod = b.addModule("encoding", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
