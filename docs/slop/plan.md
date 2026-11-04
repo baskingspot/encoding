@@ -380,7 +380,12 @@ speed it lost.
   whole, and the shuffle tables are in both the SSE and AVX2 tiers.
   baskingspot/utf#1 did not reproduce as filed; its residue is the
   AVX-512 kernel inlined whole into encoding's decode loop, a trade, not
-  shipped.
+  shipped. The owner decided: utf#1 is closed with the cause; keep
+  `utf8ToBmp`'s complete contract and register-built tail for their 1.0-1.6
+  KB; Thai from UTF-8 (about 0.7x utf's general converter) waits for a
+  three-byte path when it matters; after the repin, utf v0.2.1 shrinks
+  dispatch (split the AVX-512 tier's `.rodata`, up to 26 KB; share the BMP
+  shuffle tables between the SSE and AVX2 tiers, 12.8 KB).
 - **Repin** (running, branch `wave6-utf-repin`): `src/codec.zig`,
   `src/single_byte.zig`, `src/x_user_defined.zig`, `build.zig`,
   `build.zig.zon`, and `bench/`.
