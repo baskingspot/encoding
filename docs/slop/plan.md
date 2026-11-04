@@ -406,9 +406,16 @@ speed it lost.
   utf v0.2.1 is queued to shrink. CJK code is unchanged, instruction for
   instruction. README CPU table (10 rounds): every row 6.69x host, 5.39x
   v3, 3.81x baseline at 64 KiB.
-- **utf v0.2.1, dispatch size** (running on baskingspot/utf, branch
-  `dispatch-size`): split the AVX-512 tier's `.rodata` and share the BMP
-  shuffle tables between the SSE and AVX2 tiers; then encoding repins.
+- **utf v0.2.1, dispatch size** (released at utf `ece2734`; utf's
+  dispatch-size-20261104.md; encoding repinned): LLVM put every tier
+  object's constant-pool entries that fit no mergeable section in one
+  `.rodata`, kept whole; utf's build now rewrites each ELF tier object's
+  assembly so each function's pool has its own section, and links the BMP
+  shuffle tables once. A windows-1252 `DecoderFor` with dispatch is 21 KB
+  on x86-64-v3 and 26 KB at baseline (from 47 and 62 KB); 14 and 6.5 KB
+  without dispatch. Speed level (0.992-1.015 per operation). Proposed
+  next in utf: share the general converters' tables the same way (about 24
+  KB per program that calls `utf8ToUtf16le` at baseline or v2).
 
 ## Decisions to measure
 
