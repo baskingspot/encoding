@@ -226,15 +226,15 @@ What a small program that converts stdin links, in ReleaseSmall, net of one that
 
 | Program                          | x86-64 with AVX-512 |        x86-64-v3 | x86-64-v3, no dispatch |  x86-64 baseline | baseline, no dispatch |          aarch64 |
 | -------------------------------- | ------------------: | ---------------: | ---------------------: | ---------------: | --------------------: | ---------------: |
-| `Decoder`, any encoding by label |    185,626 + 35,525 | 251,749 + 50,408 |       221,334 + 35,906 | 274,703 + 74,623 |      184,384 + 32,917 | 220,688 + 34,404 |
-| `Encoder`, any encoding by label |    167,160 + 18,744 | 200,344 + 27,558 |       170,028 + 20,494 | 205,804 + 43,223 |      166,016 + 22,050 | 169,760 + 21,528 |
-| `DecoderFor(&.{.windows_1252})`  |         369 + 2,688 |   39,738 + 7,439 |          9,448 + 3,717 |  49,446 + 12,918 |           544 + 5,974 |    9,280 + 3,508 |
-| `EncoderFor(&.{.windows_1252})`  |         999 + 5,307 |  34,800 + 10,746 |          4,488 + 5,817 |  40,132 + 18,211 |           528 + 8,475 |    4,432 + 6,720 |
+| `Decoder`, any encoding by label |    185,626 + 35,525 | 228,149 + 50,740 |       221,334 + 36,242 | 242,191 + 74,643 |      184,384 + 32,917 | 220,704 + 34,624 |
+| `Encoder`, any encoding by label |    167,160 + 18,744 | 175,800 + 27,558 |       170,028 + 20,494 | 176,636 + 43,227 |      166,016 + 22,050 | 169,760 + 21,528 |
+| `DecoderFor(&.{.windows_1252})`  |         369 + 2,688 |   13,306 + 7,771 |          9,448 + 4,118 |  13,542 + 12,938 |           544 + 5,974 |    9,296 + 3,744 |
+| `EncoderFor(&.{.windows_1252})`  |         999 + 5,307 |   9,040 + 10,746 |          4,488 + 5,817 |   9,764 + 18,215 |           528 + 8,475 |    4,416 + 6,720 |
 | `DecoderFor(&.{.shift_jis})`     |      16,530 + 3,298 |   16,552 + 3,304 |         16,552 + 3,304 |   16,528 + 3,255 |        16,528 + 3,255 |   16,528 + 3,308 |
 | `DecoderFor(&.{.gb18030})`       |      48,762 + 4,892 |   48,784 + 4,900 |         48,784 + 4,900 |   48,752 + 4,823 |        48,752 + 4,823 |   48,768 + 4,832 |
 | `DecoderFor(&.{.euc_kr})`        |      47,562 + 2,659 |   47,560 + 2,666 |         47,560 + 2,666 |   47,552 + 2,645 |        47,552 + 2,645 |   47,552 + 2,920 |
 
-Every conversion between UTF-8 and UTF-16, the single-byte encodings' included, is baskingspot/utf's. Built for a generic x86-64 CPU, an x86-64 level or the baseline, utf picks its SIMD kernels at run time and links them for every level above the target's: that is most of what the x86-64-v3 and baseline columns add over the native one, much of it constant tables the linker keeps whole. Build with `.dispatch = false` (`b.dependency("encoding", .{ .dispatch = false })`, or `-Ddispatch=false`) to link only the target's own kernels: a one-encoding windows-1252 decoder is then 6 to 13 KB, but a baseline binary runs SSE2 code on every CPU. A native or named CPU never dispatches. encoding_rs has no build for fewer encodings: a program that uses it links all of its tables.
+Every conversion between UTF-8 and UTF-16, the single-byte encodings' included, is baskingspot/utf's. Built for a generic x86-64 CPU, an x86-64 level or the baseline, utf picks its SIMD kernels at run time and links them for every level above the target's: that is most of what the x86-64-v3 and baseline columns add over the native one. Build with `.dispatch = false` (`b.dependency("encoding", .{ .dispatch = false })`, or `-Ddispatch=false`) to link only the target's own kernels: a one-encoding windows-1252 decoder is then 6 to 14 KB instead of 21 to 26 KB, but a baseline binary runs SSE2 code on every CPU. A native or named CPU never dispatches. encoding_rs has no build for fewer encodings: a program that uses it links all of its tables.
 
 ### Detection
 
