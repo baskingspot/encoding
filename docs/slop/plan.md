@@ -337,15 +337,27 @@ not listed, under the same rules as wave 2b and wave 3.
 
 Wave 5, one orb. The orchestrating thread owns everything not listed.
 
-- **Single-byte size and baseline speed** (running, branch
-  `wave5-single-byte-size`): `src/single_byte.zig`, `src/codec.zig`, and
-  `src/x_user_defined.zig`, appending to `build.zig`, `justfile`, and
-  `bench/` as needed. A/B a BMP-only transcoder of its own for single-byte
-  staging against `codec.bmpToUtf8` and `codec.encodeStaged`, which call
-  utf, on size and speed for the host, x86-64-v3, baseline, and aarch64
-  builds; then measure an x86-64-v2 build of baseline's non-ASCII
-  single-byte decode and either accept the gap or add a loop for targets
-  without SSSE3.
+- **Single-byte size and baseline speed** (landed at `10994b9`;
+  single-byte-size-20261103.md): the single-byte and x-user-defined staging
+  converts with `codec.bmpToUtf8` and `codec.utf8ToBmp`, BMP-only
+  transcoders of our own (`vpcompressb` with AVX-512 VBMI2; `pshufb`/`tbl`
+  with 256-entry shuffle tables, 8.25 KB decode and 4 KB encode, on SSSE3,
+  AVX2, and NEON; a store a character otherwise); `codec.zig` no longer
+  imports utf. A one-encoding windows-1252 decoder is 3.1 KB on the host,
+  13 KB on x86-64-v3 and aarch64, 6.4 KB at baseline (from 6.8, 63, 26, and
+  90 KB). Against utf at the same level without dispatch: equal or faster
+  but for 3-byte text on -v3/-v2 (0.7-0.9x); a baseline build on a newer
+  CPU loses utf's dispatch (decode to UTF-8 0.65x of main there, 1.5x on a
+  CPU without SSSE3). Baseline single-byte decode looks blocks of more than
+  12 bytes from 0x80 up a load a lane (`gatherBlock`), tested without
+  `popcnt`: `nonascii` 1.07x encoding_rs at 64 KiB (from 0.84x), realistic
+  text 0.8-0.95x main. Codegen: LLVM merges overlapping fixed-offset stores
+  of constant shuffles into `pextrb`/`pinsrb` chains, builds
+  `@Vector(bool)` lane masks a lane at a time on SSE, and splits a stack
+  buffer read through a choice of pointers into bytes; keep table indexes
+  as bytes of one `pmovmskb`, and lengths in a separate table rather than
+  `pextrb` from the shuffle. Zig's `&`, `^`, and `|` share one precedence:
+  parenthesize `a << 6 | (b & 0x3F)`.
 
 ## Decisions to measure
 
