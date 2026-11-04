@@ -359,6 +359,17 @@ Wave 5, one orb. The orchestrating thread owns everything not listed.
   `pextrb` from the shuffle. Zig's `&`, `^`, and `|` share one precedence:
   parenthesize `a << 6 | (b & 0x3F)`.
 
+Wave 6, utf v0.2.0 then a repin. The owner chose to keep utf and encoding
+separate packages and move every UTF-8 and UTF-16 kernel, and the
+run-time dispatch, into utf, so a binary has one dispatcher. A utf orb
+(branch `bmp-converters` on baskingspot/utf) moves `bmpToUtf8` and
+`utf8ToBmp` from `src/codec.zig` into utf under its dispatch, fixes
+baskingspot/utf#1, and prepares v0.2.0; the orchestrating thread merges
+and releases it. Then encoding repins, deletes its converters, passes
+utf's `dispatch` option through, and re-measures the README's CPU table:
+the bar is wave 5's sizes and speeds plus the baseline-on-a-newer-CPU
+speed it lost.
+
 ## Decisions to measure
 
 1. **Table layout.** encoding_rs compresses its CJK tables (ranges and
