@@ -40,8 +40,8 @@
             .lazy = true,
         },
         .utf = .{
-            .url = "https://baskingspot.dev/utf/v0.2.1.tar.gz",
-            .hash = "utf-0.2.1-2GlLtq_JBwBqHxN70YRlvd4jKdti_T-Atx3788rqhyih",
+            .url = "https://baskingspot.dev/utf/v0.2.4.tar.gz",
+            .hash = "utf-0.2.4-2GlLtiRMCABfxIpSAB3oW48tRbl_JjAobDqQwNN9BGtH",
         },
     },
     // Specifies the set of files and directories that are included in this package.
